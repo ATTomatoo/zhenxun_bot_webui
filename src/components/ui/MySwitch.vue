@@ -13,11 +13,8 @@
       class="my-switch__input"
       :disabled="disabled"
     />
-    <span class="my-switch__core">
-      <span class="my-switch__button">
-        <span v-if="myValue" class="my-switch__emoji">🌸</span>
-        <span v-else class="my-switch__emoji">🌼</span>
-      </span>
+    <span class="my-switch__track">
+      <span class="my-switch__thumb" />
     </span>
   </div>
 </template>
@@ -62,14 +59,14 @@ export default {
   display: inline-flex;
   align-items: center;
   position: relative;
-  font-size: 14px;
   line-height: 1;
-  height: 32px;
+  height: 22px;
   vertical-align: middle;
   cursor: pointer;
+  user-select: none;
 
   &.is-disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -79,112 +76,87 @@ export default {
     height: 0;
     opacity: 0;
     margin: 0;
+    pointer-events: none;
   }
 
-  &__core {
-    margin: 0;
+  /* 轨道 */
+  &__track {
     display: inline-block;
     position: relative;
-    width: 60px;
-    height: 32px;
-    border: 2px solid var(--border-color);
-    outline: none;
-    border-radius: 16px;
+    width: 44px;
+    height: 22px;
+    border-radius: 11px;
     box-sizing: border-box;
-    background: var(--bg-color-secondary);
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: var(--el-box-shadow-lighter);
+    background: var(--el-border-color-light);
+    border: 1px solid var(--el-border-color-lighter, rgba(0, 0, 0, 0.06));
+    transition: background 0.25s ease, box-shadow 0.25s ease;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
 
     .my-switch.is-checked & {
+      background: var(--primary-color);
       border-color: var(--primary-color);
-      background: var(--primary-color-light-9);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08),
+        0 0 0 3px rgba(255, 107, 149, 0.2);
     }
 
     .my-switch.is-disabled & {
-      opacity: 0.6;
       background: var(--el-fill-color-light);
-      border-color: var(--border-color-light);
+      border-color: var(--el-border-color-lighter);
+      box-shadow: none;
+    }
+
+    .my-switch.is-checked.is-disabled & {
+      background: var(--primary-color-light-7);
+      border-color: var(--primary-color-light-7);
+      opacity: 0.8;
     }
   }
 
-  &__button {
+  /* 滑块 */
+  &__thumb {
     position: absolute;
     top: 2px;
     left: 2px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    background: linear-gradient(
-      145deg,
-      var(--primary-color-light),
-      var(--primary-color)
-    );
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: var(--el-box-shadow-lighter);
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(0, 0, 0, 0.1);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
     .my-switch.is-checked & {
-      left: calc(100% - 26px);
-      background: linear-gradient(
-        145deg,
-        var(--primary-color),
-        var(--primary-color-light)
-      );
-      transform: scale(1.1);
+      transform: translateX(24px);
     }
 
     .my-switch.is-disabled & {
-      background: var(--el-fill-color);
-      box-shadow: none;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
     }
   }
 
-  &__emoji {
-    font-size: 14px;
-    transition: all 0.3s;
-    transform: scale(1);
-    color: var(--text-color);
-
-    .my-switch.is-checked & {
-      transform: scale(1.2);
-      color: var(--primary-color);
-    }
-
-    .my-switch.is-disabled & {
-      color: var(--text-color-disabled);
-    }
-  }
-
-  &:active:not(.is-disabled) {
-    .my-switch__button {
-      width: 28px;
-
-      .my-switch.is-checked & {
-        left: calc(100% - 30px);
-      }
-    }
+  &:active:not(.is-disabled) .my-switch__thumb {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   }
 }
 
-/* 响应式调整 */
 @media (max-width: 640px) {
   .my-switch {
-    height: 28px;
+    height: 20px;
 
-    &__core {
-      width: 52px;
-      height: 28px;
-    }
-
-    &__button {
-      width: 20px;
+    &__track {
+      width: 40px;
       height: 20px;
+      border-radius: 10px;
     }
 
-    &__emoji {
-      font-size: 12px;
+    &__thumb {
+      width: 14px;
+      height: 14px;
+      top: 2px;
+      left: 2px;
+
+      .my-switch.is-checked & {
+        transform: translateX(22px);
+      }
     }
   }
 }

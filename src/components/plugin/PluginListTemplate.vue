@@ -85,31 +85,30 @@
             class="flex justify-end items-center mt-3 pt-2"
             :style="{ borderTop: '1px solid var(--border-color-light)' }"
           >
-            <!-- 开关按钮 -->
-            <NormalButton
-              :text="
-                !data.allow_switch ? '禁用' : data.status ? '开启' : '关闭'
-              "
-              iconClass="switch"
-              title="切换插件状态"
-              :disabled="!data.allow_switch"
-              :base-class="'hover:scale-110'"
-              :active-class="
-                !data.allow_switch
-                  ? 'bg-gray-100 text-gray-400'
-                  : data.status
-                  ? 'bg-green-100 text-green-600 hover:bg-green-200'
-                  : 'bg-red-100 text-red-500 hover:bg-red-200'
-              "
-              :icon-color="
-                !data.allow_switch
-                  ? 'var(--el-text-color-disabled)'
-                  : data.status
-                  ? 'var(--el-color-success)'
-                  : 'var(--el-color-danger)'
-              "
-              @click="changeSwitch(data)"
-            />
+            <!-- 开关 -->
+            <div class="flex items-center" title="切换插件状态" @click.stop>
+              <MySwitch
+                :value="data.status"
+                :disabled="!data.allow_switch"
+                @input="onSwitchChange(data, $event)"
+              />
+              <span
+                v-if="!data.allow_switch"
+                class="ml-2 text-xs"
+                :style="{ color: 'var(--text-color-secondary)' }"
+                >禁用</span
+              >
+              <span
+                v-else
+                class="ml-2 text-xs"
+                :style="{
+                  color: data.status
+                    ? 'var(--el-color-success)'
+                    : 'var(--el-color-danger)',
+                }"
+                >{{ data.status ? "开启" : "关闭" }}</span
+              >
+            </div>
 
             <!-- 配置按钮 -->
             <NormalButton
@@ -151,11 +150,12 @@
 <script>
 import UpdateDialog from "./UpdateDialog"
 import NormalButton from "@/components/ui/NormalButton.vue"
+import MySwitch from "@/components/ui/MySwitch.vue"
 
 export default {
   name: "PluginListTemplate",
   props: { pluginType: String, menuType: String },
-  components: { UpdateDialog, NormalButton },
+  components: { UpdateDialog, NormalButton, MySwitch },
   data() {
     return {
       dataList: [],
@@ -194,9 +194,12 @@ export default {
         .finally(() => loading.close())
     },
     changeSwitch(data) {
+      this.onSwitchChange(data, !data.status)
+    },
+    onSwitchChange(data, newStatus) {
       this.postRequest(`${this.$root.prefix}/plugin/change_switch`, {
         module: data.module,
-        status: !data.status,
+        status: newStatus,
       }).then((resp) => {
         if (resp.suc) {
           this.$message.success(resp.info)
