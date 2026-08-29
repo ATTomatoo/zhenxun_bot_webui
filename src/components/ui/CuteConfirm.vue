@@ -110,10 +110,11 @@ export default {
   methods: {
     handleConfirm() {
       this.$emit("confirm")
-      this.$emit("cancel")
+      this.$emit("update:visible", false)
     },
     handleCancel() {
       this.$emit("cancel")
+      this.$emit("update:visible", false)
     },
     handleOverlayClick() {
       if (this.closeOnClickOverlay) {

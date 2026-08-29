@@ -12,6 +12,7 @@ import MainDashboard from "@/views/dashboard/MainDashboard"
 import SystemInfo from "@/views/system/SystemInfo"
 import Configure from "@/views/configure/Configure"
 import About from "@/views/about/About"
+import ProtocolSetting from "@/views/protocol/ProtocolSetting"
 
 Vue.use(VueRouter)
 
@@ -43,6 +44,7 @@ const routes = [
       { path: "/store", name: "插件商店", component: StoreManage },
       { path: "/manage", name: "好友/群组", component: FriendGroupManage },
       { path: "/database", name: "数据库管理", component: DatabaseManage },
+      { path: "/protocol", name: "协议端设置", component: ProtocolSetting },
       { path: "/system", name: "系统信息", component: SystemInfo },
       { path: "/about", name: "关于我们", component: About },
     ],
