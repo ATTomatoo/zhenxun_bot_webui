@@ -304,17 +304,19 @@ export default {
     changeUrl() {
       setTimeout(() => {
         this.clickEffect = false
+        const port = Number(this.port)
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          this.$message.error("端口必须是 1 到 65535 之间的整数")
+          return
+        }
         if (!this.apiUrl.startsWith("http")) {
           this.apiUrl = "http://" + this.apiUrl
         }
+        this.apiUrl = this.apiUrl.replace(/[\\/]+$/, "")
         setBaseApiUrl(this.apiUrl)
-        setPort(this.port)
+        setPort(String(port))
         this.$message.success("修改地址端口成功！")
-        if (this.fromPageName == "Configure") {
-          this.goBack()
-        } else {
-          this.$router.replace("/")
-        }
+        window.location.replace(`${this.apiUrl}:${port}/#/`)
       }, 600)
     },
     inpOnfocus() {
