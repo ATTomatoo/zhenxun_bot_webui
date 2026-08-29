@@ -915,7 +915,7 @@ export default {
 
 /* 依赖安装对话框 */
 .dependency-dialog {
-  /deep/ .el-dialog {
+  ::v-deep .el-dialog {
     width: 90% !important;
     max-width: 600px !important;
   }
@@ -969,7 +969,7 @@ export default {
 
 @media (max-width: 640px) {
   .dependency-dialog {
-    /deep/ .el-dialog {
+    ::v-deep .el-dialog {
       width: 95% !important;
     }
 

@@ -139,7 +139,7 @@ export default {
 }
 
 .moe-el-select {
-  /deep/ .el-input__inner {
+  ::v-deep .el-input__inner {
     @apply pl-8 pr-8 h-10 rounded-lg;
     background-color: var(--bg-color-secondary);
     color: var(--text-color);
@@ -193,7 +193,7 @@ export default {
   box-shadow: var(--el-box-shadow-light);
   max-height: 300px !important;
 
-  /deep/ .el-select-dropdown__item {
+  ::v-deep .el-select-dropdown__item {
     @apply flex items-center py-2 px-4;
     color: var(--text-color);
     transition: all 0.2s ease;

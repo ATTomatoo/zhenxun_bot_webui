@@ -98,7 +98,7 @@ export default {
 }
 
 .moe-el-input {
-  /deep/ .el-input__inner {
+  ::v-deep .el-input__inner {
     @apply pr-8 h-10 rounded-lg;
     background-color: var(--bg-color-secondary);
     color: var(--text-color);
@@ -149,7 +149,7 @@ export default {
 /* 响应式调整 */
 @media (max-width: 640px) {
   .moe-el-input {
-    /deep/ .el-input__inner {
+    ::v-deep .el-input__inner {
       @apply h-9 text-sm;
       padding: 0px 24px !important;
     }
