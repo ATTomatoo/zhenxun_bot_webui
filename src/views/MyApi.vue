@@ -267,7 +267,12 @@
 </template>
 
 <script>
-import { getBaseApiUrl, setBaseApiUrl, getPort, setPort } from "@/utils/api"
+import {
+  getBrowserBaseApiUrl,
+  getBrowserPort,
+  setBaseApiUrl,
+  setPort,
+} from "@/utils/api"
 import CuteButton from "@/components/ui/CuteButton.vue"
 import SvgIcon from "@/components/SvgIcon/SvgIcon.vue"
 
@@ -276,9 +281,9 @@ export default {
   components: { CuteButton, SvgIcon },
   data() {
     return {
-      port: getPort(),
+      port: getBrowserPort(),
       rightShow: false,
-      apiUrl: getBaseApiUrl(),
+      apiUrl: getBrowserBaseApiUrl(),
       fromPage: "/",
       fromPageName: "",
       clickEffect: false,

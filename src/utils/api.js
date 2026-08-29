@@ -68,14 +68,26 @@ axios.interceptors.response.use(
   }
 )
 
-let baseApiUrl = "http://localhost"
+export const getBrowserBaseApiUrl = () => {
+  const protocol = ["http:", "https:"].includes(window.location.protocol)
+    ? window.location.protocol
+    : "http:"
+  return `${protocol}//${window.location.hostname || "localhost"}`
+}
+
+export const getBrowserPort = () => {
+  if (window.location.port) return window.location.port
+  return window.location.protocol === "https:" ? "443" : "80"
+}
+
+let baseApiUrl = getBrowserBaseApiUrl()
 
 export const getBaseUrl = () => {
   return getBaseApiUrl() + ":" + getPort()
 }
 
 export const setPort = (port) => {
-  localStorage.setItem("port", port)
+  localStorage.setItem("port", String(port))
 }
 
 export const getPort = () => {
@@ -90,10 +102,15 @@ export const setBaseApiUrl = (url) => {
     baseApiUrl = url
     setBaseUrlLocalStorage(baseApiUrl)
   } else {
-    baseApiUrl = "http://localhost"
+    baseApiUrl = getBrowserBaseApiUrl()
     setBaseUrlLocalStorage(baseApiUrl)
-    setPort("8080")
+    setPort(getBrowserPort())
   }
+}
+
+export const syncApiWithBrowserLocation = () => {
+  setBaseApiUrl(getBrowserBaseApiUrl())
+  setPort(getBrowserPort())
 }
 
 export const getBaseApiUrl = () => {
