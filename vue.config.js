@@ -12,7 +12,7 @@ proxyObj["/"] = {
   pathReWrite: {
     "^/": "/",
   },
-  ws: false,
+  ws: true,
 }
 
 module.exports = {

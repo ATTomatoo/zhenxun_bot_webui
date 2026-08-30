@@ -272,6 +272,19 @@ export default {
     }
   },
   methods: {
+    async checkFirstRun() {
+      try {
+        const response = await this.getRequest(
+          `${this.$root.prefix}/configure/status`
+        )
+        const state = response && response.data && response.data.state
+        if (["unconfigured", "partial", "restart_pending"].includes(state)) {
+          this.$router.replace("/configure")
+        }
+      } catch (error) {
+        // Login remains available when an older backend has no setup status route.
+      }
+    },
     async submitLogin() {
       try {
         const valid = await this.$refs.loginForm.validate()
@@ -424,6 +437,7 @@ export default {
     },
   },
   mounted() {
+    this.checkFirstRun()
     const firstSetting = this.$route.params.firstSetting
     if (firstSetting) {
       this.dialogVisible = true

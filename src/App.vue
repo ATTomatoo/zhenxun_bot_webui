@@ -5,7 +5,7 @@
 </template>
 
 <script>
-import { syncApiWithBrowserLocation } from "@/utils/api"
+import { getBaseUrlLocalStorage, setBaseApiUrl } from "@/utils/api"
 export default {
   name: "App",
   data() {
@@ -20,7 +20,10 @@ export default {
     },
   },
   created() {
-    syncApiWithBrowserLocation()
+    const savedBaseUrl = getBaseUrlLocalStorage()
+    if (savedBaseUrl) {
+      setBaseApiUrl(savedBaseUrl)
+    }
   },
   mounted() {
     window.addEventListener("resize", this.handleResize)
