@@ -86,16 +86,17 @@
       <el-button type="primary" :loading="saving" @click="save">保存配置</el-button>
     </footer>
 
-    <div v-if="restarting" class="restart-overlay"><i class="el-icon-loading"></i><h2>正在重启真寻</h2><p>数据服务配置将在新进程中生效。</p></div>
   </div>
 </template>
 
 <script>
+import { startRestartRecovery } from "@/utils/restart-recovery"
+
 export default {
   name: "DatabaseManage",
   data() {
     return {
-      loading: false, saving: false, probing: false, cacheAction: "", restarting: false, revision: "", launcherManaged: false, runtime: {}, probeError: "",
+      loading: false, saving: false, probing: false, cacheAction: "", revision: "", launcherManaged: false, runtime: {}, probeError: "",
       database: { mode: "sqlite", path: "data/db/zhenxun.db", host: "127.0.0.1", port: 3306, username: "", password: "", database: "", url: "" },
       cache: { mode: "MEMORY", host: "127.0.0.1", port: 6379, password: "" },
       probeResults: {},
@@ -160,13 +161,7 @@ export default {
     async restart() {
       const response = await this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {})
       if (!response.suc) throw new Error(response.info)
-      this.restarting = true
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-        try { const check = await fetch(`${window.location.origin}${this.$root.prefix}/configure/status`, { cache: "no-store" }); if (check.ok) { window.location.reload(); return } }
-        catch (error) { /* Expected while restarting. */ }
-      }
-      this.restarting = false; this.$message.warning("自动连接超时，请稍后手动刷新页面。")
+      startRestartRecovery({ bootId: response.data.boot_id, accessUrls: response.data.access_urls, returnRoute: "/database", message: "数据服务配置将在新进程中生效。" })
     },
     async refreshRuntime() { await this.cacheRequest("refresh", "/database/cache/refresh", {}) },
     async clearLocal() { await this.cacheRequest("local", "/database/cache/clear", { scope: "local" }) },
@@ -194,6 +189,5 @@ export default {
 .settings-band { margin-bottom: 14px; padding: 18px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color-secondary); }.section-heading h2 { font-size: 18px; }.mode-selector { margin: 18px 0 14px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }.form-grid .wide { grid-column: 1 / -1; }.form-grid ::v-deep .el-input-number { width: 100%; }.metric-row { justify-content: flex-start; margin-top: 10px; color: var(--text-color-secondary); }.metric-row span { padding-right: 22px; }
 .metrics-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }.metric { min-width: 0; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; }.metric span { display: block; overflow: hidden; color: var(--text-color-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.metric strong { display: block; margin-top: 5px; font-size: 20px; }.runtime-table { margin-bottom: 14px; }.cache-actions { justify-content: flex-start; flex-wrap: wrap; }
 .save-bar { position: sticky; bottom: 0; z-index: 3; padding: 12px 0; border-top: 1px solid var(--border-color); background: var(--bg-color); }.save-bar span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.inline-error { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--el-color-danger-light-7); border-radius: 5px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); }.status-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--border-color); border-radius: 5px; color: var(--text-color-secondary); font-size: 12px; white-space: nowrap; }.status-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-info); }.status-pill.is-ok i { background: var(--el-color-success); }.status-pill.is-error i { background: var(--el-color-danger); }.status-pill em { font-style: normal; }
-.restart-overlay { position: fixed; inset: 0; z-index: 5000; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(250, 251, 253, .97); color: #30333a; }.restart-overlay i { color: #c74e80; font-size: 42px; }
 @media (max-width: 1050px) { .metrics-grid { grid-template-columns: repeat(3, 1fr); } }@media (max-width: 680px) { .data-page { padding: 12px; }.page-header, .section-heading { align-items: flex-start; }.form-grid { grid-template-columns: 1fr; }.form-grid .wide { grid-column: auto; }.mode-selector { display: flex; overflow-x: auto; }.metrics-grid { grid-template-columns: repeat(2, 1fr); }.save-bar { flex-wrap: wrap; }.save-bar span { width: 100%; } }
 </style>

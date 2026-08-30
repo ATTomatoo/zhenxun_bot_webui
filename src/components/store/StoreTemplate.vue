@@ -96,6 +96,7 @@ export default {
     return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, drawerVisible: false, selectedPlugin: null }
   },
   computed: {
+    pluginOperation() { return this.$store.state.pluginOperation },
     pluginTypes() { return [...new Set(this.plugins.map((item) => item.plugin_type).filter(Boolean))].sort() },
     filteredPlugins() {
       const keyword = this.search.toLowerCase()
@@ -130,15 +131,36 @@ export default {
     },
     async runAction(action, plugin) {
       const labels = { install: "安装", update: "更新", remove: "卸载" }
+      if (this.pluginOperation.active) {
+        this.$message.warning("已有插件操作正在进行，请等待完成。")
+        return
+      }
       const confirmed = await this.$cuteConfirm({ title: `${labels[action]}插件`, message: `确认${labels[action]}“${plugin.name}”？`, confirmButtonText: "确认", cancelButtonText: "取消", type: action === "remove" ? "warning" : "info" })
       if (!confirmed) return
       this.actionId = plugin.id
+      const runningTitle = action === "remove" ? "正在卸载插件" : "正在下载并安装插件"
+      this.$store.commit("START_PLUGIN_OPERATION", {
+        action,
+        pluginName: plugin.name,
+        title: runningTitle,
+        message: "请稍候，切换到其他页面不会中断当前操作。",
+      })
       try {
         const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, { id: plugin.id })
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
-        this.$message.success(response.info || `${labels[action]}完成`)
-        await this.loadPlugins()
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || `${labels[action]}失败`) }
+        this.$store.commit("FINISH_PLUGIN_OPERATION", {
+          status: "success",
+          title: `插件${labels[action]}完成`,
+          message: response.info || `${labels[action]}已完成。`,
+        })
+        if (!this._isDestroyed) await this.loadPlugins()
+      } catch (error) {
+        this.$store.commit("FINISH_PLUGIN_OPERATION", {
+          status: "error",
+          title: `插件${labels[action]}失败`,
+          message: error.response?.data?.detail || error.message || `${labels[action]}失败`,
+        })
+      }
       finally { this.actionId = null }
     },
   },

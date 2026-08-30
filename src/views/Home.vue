@@ -173,6 +173,17 @@
                 <svg-icon icon-class="server" class="w-5 h-5" />
               </router-link>
             </el-tooltip>
+            <el-tooltip :content="restartTooltip" placement="bottom">
+              <button
+                type="button"
+                class="header-icon-button"
+                :disabled="!restartAvailable || restartLoading"
+                aria-label="重启真寻"
+                @click="restartWorker"
+              >
+                <i :class="restartLoading ? 'el-icon-loading' : 'el-icon-refresh-right'"></i>
+              </button>
+            </el-tooltip>
           </div>
 
           <!-- 右侧功能区 -->
@@ -219,73 +230,51 @@
             </el-dropdown>
 
             <!-- 账号切换 -->
-            <el-popover
+            <el-dropdown
+              v-if="botState === 'ready'"
               placement="bottom-end"
-              width="280"
-              trigger="hover"
-              popper-class="shadow-xl overflow-hidden"
+              trigger="click"
+              class="bot-switch-dropdown"
+              @command="selectBot"
             >
-              <div class="max-h-96 overflow-y-auto custom-scrollbar">
-                <div
+              <div class="bot-switch flex items-center cursor-pointer group">
+                <span class="mr-2" :style="{ color: 'var(--text-color)' }">切换账号</span>
+                <el-image
+                  :src="botInfo.ava_url || ''"
+                  class="w-10 h-10 rounded-full object-cover border-2 shadow-sm"
+                  :style="{ borderColor: 'var(--primary-color)' }"
+                />
+                <i class="el-icon-arrow-down ml-2"></i>
+              </div>
+              <el-dropdown-menu slot="dropdown" class="bot-switch-menu">
+                <el-dropdown-item
                   v-for="bot in botList"
-                  :key="bot.bot_id"
-                  @click="getBotInfo(bot.self_id)"
-                  class="flex items-center p-3 cursor-pointer transition-all duration-300"
-                  :style="{
-                    backgroundColor: bot.is_select
-                      ? 'var(--bg-color-hover)'
-                      : 'transparent',
-                  }"
+                  :key="bot.bot_key"
+                  :command="bot.bot_key"
+                  :disabled="bot.bot_key === botInfo.bot_key"
+                  class="bot-switch-item"
                 >
                   <el-image
                     :src="bot.ava_url"
-                    class="w-10 h-10 rounded-full object-cover border-2 transition-all duration-300"
+                    class="w-9 h-9 rounded-full object-cover border-2"
                     :style="{ borderColor: 'var(--primary-color-light)' }"
                   />
-                  <div class="ml-3">
-                    <p
-                      :style="{ color: 'var(--text-color)' }"
-                      class="font-medium"
-                    >
-                      {{ bot.nickname }}
-                    </p>
-                    <span
-                      :style="{ color: 'var(--text-color-secondary)' }"
-                      class="text-xs"
-                      >{{ bot.self_id }}</span
-                    >
+                  <div class="bot-switch-copy">
+                    <strong>{{ bot.nickname }}</strong>
+                    <span>{{ bot.runtime_bot_id }} · {{ bot.platform === "qq_official" ? "QQ_Official" : "OneBot V11" }}</span>
                   </div>
-                </div>
-              </div>
-
-              <template #reference>
-                <div
-                  v-if="botState === 'ready'"
-                  class="bot-switch flex items-center cursor-pointer group"
-                >
-                  <span
-                    class="mr-2 transition-all duration-300"
-                    :style="{ color: 'var(--text-color)' }"
-                  >
-                    切换账号
-                  </span>
-                  <el-image
-                    :src="botInfo.ava_url || ''"
-                    class="w-10 h-10 rounded-full object-cover border-2 shadow-sm transition-all duration-300"
-                    :style="{ borderColor: 'var(--primary-color)' }"
-                  />
-                </div>
-                <button
-                  v-else
-                  type="button"
-                  class="bot-connect-shortcut"
-                  @click="navigateTo('/protocol')"
-                >
-                  <i class="el-icon-connection"></i>
-                  <span class="hidden lg:inline">连接机器人</span>
-                </button>
-              </template>
-            </el-popover>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </el-dropdown>
+            <button
+              v-else
+              type="button"
+              class="bot-connect-shortcut"
+              @click="navigateTo('/protocol')"
+            >
+              <i class="el-icon-connection"></i>
+              <span class="hidden lg:inline">连接机器人</span>
+            </button>
 
             <!-- 用户下拉菜单 -->
             <el-dropdown
@@ -348,10 +337,11 @@
           @click="handleMainClick"
         >
           <bot-required-state
-            v-if="routeRequiresBot && botState !== 'ready'"
-            :state="botState"
+            v-if="routeBlockState"
+            :state="routeBlockState"
             @configure="navigateTo('/protocol')"
             @retry="getBotInfo()"
+            @switch-supported="switchToSupportedBot"
           />
           <router-view
             v-else
@@ -369,19 +359,23 @@
       :visible.sync="accountSecurityVisible"
       @password-reset="finishLogout"
     />
+    <plugin-operation-dialog />
   </div>
 </template>
 
 <script>
 import AccountSecurityDialog from "@/components/account/AccountSecurityDialog"
 import BotRequiredState from "@/components/common/BotRequiredState"
+import PluginOperationDialog from "@/components/store/PluginOperationDialog"
 import logoUrl from "@/assets/image/logo.png"
 import EventBus from "@/utils/event-bus"
 import { clearCookie } from "@/utils/api"
 import { getHeaderHeight } from "@/utils/utils"
+import { hasDirtyState } from "@/utils/dirty-state"
+import { startRestartRecovery } from "@/utils/restart-recovery"
 export default {
   name: "MainHome",
-  components: { AccountSecurityDialog, BotRequiredState },
+  components: { AccountSecurityDialog, BotRequiredState, PluginOperationDialog },
   data() {
     return {
       accountSecurityVisible: false,
@@ -398,6 +392,9 @@ export default {
       botInfo: {},
       botState: "loading",
       botInitialized: false,
+      botRequestSequence: 0,
+      restartAvailable: false,
+      restartLoading: false,
       firstLoad: true,
       windowHeight: window.innerHeight,
       themes: [
@@ -443,6 +440,23 @@ export default {
     routeRequiresBot() {
       return this.$route.matched.some((record) => record.meta.requiresBot)
     },
+    requiredCapability() {
+      const record = [...this.$route.matched]
+        .reverse()
+        .find((item) => item.meta.requiredCapability)
+      return record ? record.meta.requiredCapability : ""
+    },
+    routeBlockState() {
+      if (!this.routeRequiresBot) return ""
+      if (this.botState !== "ready") return this.botState
+      if (
+        this.requiredCapability &&
+        !this.botInfo.capabilities?.[this.requiredCapability]
+      ) {
+        return "unsupported"
+      }
+      return ""
+    },
     contentWidth() {
       if (this.isMobile) return "100%"
       return this.isCollapsed ? "calc(100% - 5.5rem)" : "calc(100% - 13.5rem)"
@@ -460,15 +474,22 @@ export default {
       }
       return { status: "warning", label: "正在连接", detail: "正在建立WebUI状态通道" }
     },
+    restartTooltip() {
+      return this.restartAvailable
+        ? "重启真寻"
+        : "当前不是 launcher 托管模式，请手动重启"
+    },
   },
   created() {
     this.getBotInfo()
   },
   mounted() {
     this.getMenus()
+    this.loadRestartStatus()
     this.$store.dispatch("initStatusSocket")
     window.addEventListener("resize", this.handleResize)
     window.addEventListener("zhenxun-websocket-state", this.handleSocketState)
+    window.addEventListener("zhenxun-auth-expired", this.closeSockets)
     const savedCollapse = localStorage.getItem("menuCollapsed")
     this.collapsePreference =
       savedCollapse == null ? null : savedCollapse === "true"
@@ -477,6 +498,7 @@ export default {
   beforeDestroy() {
     window.removeEventListener("resize", this.handleResize)
     window.removeEventListener("zhenxun-websocket-state", this.handleSocketState)
+    window.removeEventListener("zhenxun-auth-expired", this.closeSockets)
   },
   inject: ["setAppTheme"],
   methods: {
@@ -485,6 +507,36 @@ export default {
       if (channel && Object.prototype.hasOwnProperty.call(this.socketStates, channel)) {
         this.$set(this.socketStates, channel, event.detail.status)
       }
+    },
+    async loadRestartStatus() {
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/system/restart/status`, {}, { suppressErrorToast: true })
+        this.restartAvailable = Boolean(response && response.suc && response.data.launcher_managed)
+      } catch (error) {
+        this.restartAvailable = false
+      }
+    },
+    async restartWorker() {
+      if (!this.restartAvailable || this.restartLoading) return
+      const warning = hasDirtyState()
+        ? "当前页面有尚未保存的修改，重启后这些修改会丢失。是否继续重启？"
+        : "重启会短暂断开所有 Bot 和 WebUI 连接，是否继续？"
+      try {
+        await this.$confirm(warning, "确认重启", { type: "warning", confirmButtonText: "确认重启" })
+      } catch (error) { return }
+      this.restartLoading = true
+      try {
+        const response = await this.postRequest(`${this.$root.prefix}/system/restart`, {})
+        if (!response || !response.suc) throw new Error(response && response.info)
+        startRestartRecovery({ bootId: response.data.boot_id, accessUrls: response.data.access_urls, returnRoute: this.$route.path, message: "正在等待 launcher 启动新的真寻进程。" })
+      } catch (error) {
+        this.$message.error(error.response?.data?.detail || error.message || "重启请求失败。")
+      } finally {
+        this.restartLoading = false
+      }
+    },
+    selectBot(botKey) {
+      this.getBotInfo(botKey)
     },
     queryMenuSearch(query, callback) {
       const keyword = String(query || "").trim().toLowerCase()
@@ -525,6 +577,13 @@ export default {
       this.$statusWebSocket.closeWebSocket()
       this.$logWebSocket.closeWebSocket()
       this.$chatWebSocket.closeWebSocket()
+    },
+    switchToSupportedBot() {
+      const bot = this.botList.find(
+        (item) => item.capabilities?.[this.requiredCapability]
+      )
+      if (bot) this.getBotInfo(bot.bot_key)
+      else this.navigateTo("/protocol")
     },
     finishLogout(showMessage = false) {
       this.closeSockets()
@@ -614,14 +673,16 @@ export default {
         }
       })
     },
-    async getBotInfo(bot_id) {
+    async getBotInfo(botKey) {
+      const requestSequence = ++this.botRequestSequence
       if (!this.botInfo.self_id) this.botState = "loading"
       try {
         const resp = await this.getRequest(
           `${this.$root.prefix}/main/get_base_info`,
-          { bot_id },
+          { bot_id: botKey },
           { suppressErrorToast: true }
         )
+        if (requestSequence !== this.botRequestSequence) return
         if (resp.suc) {
           this.botList = resp.data || []
           if (!this.botList.length) {
@@ -629,16 +690,16 @@ export default {
             this.$store.commit("SET_BOT", null)
             this.botState = "empty"
           } else {
-            const persistedId = this.$store.state.botInfo?.self_id
+            const persistedKey = this.$store.state.selectedBotKey
             const selected =
-              this.botList.find((bot) => bot_id && bot.self_id == bot_id) ||
+              this.botList.find((bot) => botKey && bot.bot_key === botKey) ||
               this.botList.find(
-                (bot) => !bot_id && bot.self_id == persistedId
+                (bot) => !botKey && bot.bot_key === persistedKey
               ) ||
               this.botList.find((bot) => bot.is_select) ||
               this.botList[0]
             this.botList.forEach((bot) => {
-              this.$set(bot, "is_select", bot.self_id == selected.self_id)
+              this.$set(bot, "is_select", bot.bot_key === selected.bot_key)
             })
             this.botInfo = selected
             this.$store.commit("SET_BOT", selected)
@@ -656,9 +717,10 @@ export default {
           this.botState = this.botInfo.self_id ? "ready" : "error"
         }
       } catch (error) {
+        if (requestSequence !== this.botRequestSequence) return
         this.botState = this.botInfo.self_id ? "ready" : "error"
       } finally {
-        this.botInitialized = true
+        if (requestSequence === this.botRequestSequence) this.botInitialized = true
       }
     },
     handleThemeChange(command) {
@@ -735,6 +797,9 @@ export default {
   color: var(--primary-color);
   background: var(--bg-color);
 }
+
+.header-icon-button:disabled { opacity: .45; cursor: not-allowed; }
+.bot-switch-menu { min-width: 280px; }.bot-switch-item { height: auto !important; padding: 8px 12px !important; line-height: 1.2 !important; }.bot-switch-item ::v-deep .el-dropdown-menu__item { display: flex; }.bot-switch-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; margin-left: 10px; }.bot-switch-copy strong, .bot-switch-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.bot-switch-copy span { color: var(--text-color-secondary); font-size: 12px; }
 
 .route-surface {
   min-width: 0;

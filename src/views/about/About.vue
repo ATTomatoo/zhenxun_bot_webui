@@ -27,7 +27,7 @@
                 <el-radio-button label="download">下载包</el-radio-button>
                 <el-radio-button label="git">Git</el-radio-button>
               </el-radio-group>
-              <label>下载源</label>
+              <label>更新源</label>
               <el-radio-group v-model="options.source" size="mini">
                 <el-radio-button label="github">GitHub</el-radio-button>
                 <el-radio-button label="aliyun">阿里云</el-radio-button>
@@ -46,8 +46,8 @@
           <div class="version-card-title">
             <span class="component-icon" :class="component.key"><i :class="component.icon"></i></span>
             <div><h3>{{ component.name }}</h3><span>{{ component.source }}</span></div>
-            <el-tag size="mini" :type="component.updateAvailable ? 'warning' : 'success'">
-              {{ component.updateAvailable ? "可更新" : "已是最新" }}
+            <el-tag size="mini" :type="component.blocked ? 'danger' : component.updateAvailable ? 'warning' : 'success'">
+              {{ component.blocked ? "已屏蔽" : component.updateAvailable ? "可更新" : "已是最新" }}
             </el-tag>
           </div>
           <dl>
@@ -57,12 +57,16 @@
           <div v-if="jobFor(component.key)" class="job-progress">
             <el-progress :percentage="jobFor(component.key).progress || 0" :status="jobProgressStatus(jobFor(component.key))" />
             <span>{{ jobStateLabel(jobFor(component.key)) }}</span>
+            <span>{{ jobSourceLabel(jobFor(component.key)) }}</span>
           </div>
           <div v-if="component.key === 'webui' && !component.manifestAvailable" class="compatibility-note">
             远端尚无版本清单，只显示 dist 提交摘要，暂不允许静默降级。
           </div>
           <div v-else-if="component.key === 'webui' && !component.compatible" class="compatibility-note">
             远端 WebUI 与当前本体 API 版本不兼容，已阻止更新。
+          </div>
+          <div v-else-if="component.blocked" class="compatibility-note blocked-note">
+            {{ component.blockReason || "该版本存在已知兼容性问题，已禁止更新。" }}
           </div>
           <div class="version-actions">
             <span>{{ component.ref ? `来源 ${component.ref}` : "官方仓库" }}</span>
@@ -112,7 +116,7 @@ export default {
   data() {
     return {
       logoUrl, checking: false, updateInfo: null, updateError: "",
-      options: { channel: "main", method: "download", source: "github", force: false },
+      options: { channel: "main", method: "git", source: "aliyun", force: false },
       jobs: {}, pollTimer: null,
     }
   },
@@ -125,7 +129,7 @@ export default {
       const components = (this.updateInfo && this.updateInfo.components) || {}
       return ["bot", "resource", "webui"].map((key) => {
         const item = components[key] || {}
-        return { key, ...COMPONENT_META[key], currentVersion: item.current_version || "未知", latestVersion: item.latest_version || "未知", updateAvailable: Boolean(item.update_available), manifestAvailable: item.manifest_available !== false, compatible: item.compatible !== false, ref: item.ref, source: "官方仓库" }
+        return { key, ...COMPONENT_META[key], currentVersion: item.current_version || "未知", latestVersion: item.latest_version || "未知", updateAvailable: Boolean(item.update_available), blocked: Boolean(item.blocked), blockReason: item.block_reason || "", manifestAvailable: item.manifest_available !== false, compatible: item.compatible !== false, ref: item.ref, source: "官方仓库" }
       })
     },
   },
@@ -151,11 +155,19 @@ export default {
     },
     jobFor(component) { return this.jobs[component] },
     isUpdating(component) { const job = this.jobFor(component); return Boolean(job && !["completed", "failed"].includes(job.state)) },
-    canUpdate(component) { if (this.isUpdating(component.key) || component.latestVersion === "未知") return false; return component.key !== "webui" || (component.manifestAvailable && component.compatible) },
+    canUpdate(component) { if (component.blocked || this.isUpdating(component.key) || component.latestVersion === "未知") return false; return component.key !== "webui" || (component.manifestAvailable && component.compatible) },
     jobProgressStatus(job) { if (job.state === "failed") return "exception"; if (job.state === "completed") return "success"; return undefined },
     jobStateLabel(job) {
       const labels = { queued: "等待执行", preparing: "正在下载并校验", staged: "更新包已就绪", pending_restart: job.restart_available ? "等待自动重启应用" : "等待手动重启应用", applying: "正在应用更新", completed: "更新完成", failed: `更新失败：${job.error || "未知错误"}` }
       return labels[job.state] || job.state
+    },
+    jobSourceLabel(job) {
+      if (!job) return ""
+      const source = job.effective_source || job.source
+      const label = source === "aliyun" ? "阿里云" : "GitHub"
+      return (job.attempted_sources || []).length > 1
+        ? `阿里云传输失败，已回退 ${label}`
+        : `实际来源：${label}`
     },
     async startUpdate(component) {
       const force = component.key === "bot" && this.options.force
@@ -202,6 +214,7 @@ export default {
 .component-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 7px; color: #fff; font-size: 18px; background: #5d77a5; }.component-icon.resource { background: #3b916f; }.component-icon.webui { background: #c0527f; }
 dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px 0; } dl div { min-width: 0; } dt { color: var(--text-color-secondary); font-size: 12px; } dd { overflow: hidden; margin: 5px 0 0; font-family: Consolas, monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .job-progress { margin: 0 0 14px; }.job-progress > span, .compatibility-note { display: block; margin-top: 6px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; }.compatibility-note { margin: 0 0 14px; color: #b7791f; }
+.blocked-note { color: var(--danger-color, #e05260); }
 .version-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border-color-light); }.version-actions span { overflow: hidden; color: var(--text-color-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .about-content { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 28px; padding: 30px 0; }.about-content article { min-width: 0; }.about-content p { color: var(--text-color-secondary); line-height: 1.75; }.about-content a { color: var(--primary-color); text-decoration: none; }.link-row { display: flex; flex-wrap: wrap; gap: 16px; }
 footer { padding-top: 18px; border-top: 1px solid var(--border-color-light); color: var(--text-color-secondary); text-align: center; font-size: 13px; }

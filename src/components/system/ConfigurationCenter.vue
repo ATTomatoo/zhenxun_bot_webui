@@ -54,27 +54,28 @@
         </div>
         <el-input v-model="rawContent" type="textarea" :rows="22" resize="vertical" class="raw-editor" spellcheck="false" />
         <div v-if="rawError" class="inline-error">{{ rawError }}</div>
+        <ul v-if="rawIssues.length" class="validation-issues">
+          <li v-for="(issue, index) in rawIssues" :key="`${issue.code}-${index}`">
+            <code v-if="issue.line">第 {{ issue.line }} 行<span v-if="issue.column">:{{ issue.column }}</span></code>
+            <span>{{ issue.message }}</span>
+          </li>
+        </ul>
         <div class="action-bar">
           <span>保存前会重新校验语法和 revision</span>
-          <el-button :loading="validating" @click="validateRaw">校验</el-button>
-          <el-button type="primary" :loading="saving === 'raw'" @click="saveRaw">保存</el-button>
+          <el-button :loading="validating" :disabled="!rawReady" @click="validateRaw">校验</el-button>
+          <el-button type="primary" :loading="saving === 'raw'" :disabled="!rawReady" @click="saveRaw">保存</el-button>
         </div>
       </el-tab-pane>
     </el-tabs>
 
-    <div v-if="restarting" class="restart-overlay">
-      <i class="el-icon-loading"></i><h2>正在重启真寻</h2><p>服务恢复后页面会自动刷新。</p>
-      <div v-if="restartTimedOut" class="restart-addresses">
-        <p>自动连接超时，可从以下地址手动打开：</p>
-        <a v-for="url in restartTargets" :key="url" :href="`${url}/#/`">{{ url }}</a>
-      </div>
-    </div>
   </div>
 </template>
 
 <script>
 import AutoComponent from "@/components/plugin/AutoComponent.vue"
 import { buildRestartTargets } from "@/utils/restart-targets"
+import { apiErrorDetail, apiErrorIssues } from "@/utils/api-error"
+import { startRestartRecovery } from "@/utils/restart-recovery"
 
 export default {
   name: "ConfigurationCenter",
@@ -82,8 +83,8 @@ export default {
   data() {
     return {
       loading: false, saving: "", validating: false, section: "env", envRevision: "", simpleRevision: "", envFields: {}, originalEnvFields: {}, groups: [], simpleChanges: {}, groupSearch: "", expandedGroups: "", launcherManaged: false,
-      rawFile: "env", rawContent: "", rawRevision: "", rawError: "", rawLoaded: {},
-      restarting: false, restartTimedOut: false, restartTargets: [],
+      rawFile: "env", rawContent: "", rawRevision: "", rawError: "", rawIssues: [], rawLoaded: {},
+      restartTargets: [],
       envFieldDefinitions: [
         { key: "HOST", label: "监听地址", placeholder: "0.0.0.0", help: "0.0.0.0 允许局域网访问，127.0.0.1 仅本机访问。" },
         { key: "PORT", label: "监听端口", placeholder: "8080", help: "WebUI 与适配器共享的本地服务端口。" },
@@ -100,6 +101,7 @@ export default {
     }
   },
   computed: {
+    rawReady() { return Boolean(this.rawLoaded[this.rawFile] && /^[a-f0-9]{64}$/.test(this.rawRevision)) },
     filteredGroups() {
       const keyword = this.groupSearch.trim().toLowerCase()
       if (!keyword) return this.groups
@@ -152,7 +154,7 @@ export default {
         this.$message.success(response.info)
         if (response.data.restart_available) await this.restart(response.data.access_urls || [])
         else this.$message.warning("配置已保存，请手动重启真寻后生效。")
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "保存失败") }
+      } catch (error) { this.$message.error(apiErrorDetail(error, "保存失败")) }
       finally { this.saving = "" }
     },
     async saveSimple() {
@@ -162,29 +164,30 @@ export default {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/simple`, { expected_revision: this.simpleRevision, fields: this.simpleChanges })
         if (!response.suc) throw new Error(response.info)
         this.simpleRevision = response.data.revision; this.simpleChanges = {}; this.$message.success(response.info)
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "保存失败") }
+      } catch (error) { this.$message.error(apiErrorDetail(error, "保存失败")) }
       finally { this.saving = "" }
     },
     async loadRaw(file) {
-      this.rawError = ""
+      this.rawError = ""; this.rawIssues = []; this.rawRevision = ""
       try {
         const response = await this.getRequest(`${this.$root.prefix}/system/configuration/files/${file}`, {}, { suppressErrorToast: true })
         if (!response.suc) throw new Error(response.info)
         this.rawContent = response.data.content; this.rawRevision = response.data.revision; this.$set(this.rawLoaded, file, true)
-      } catch (error) { this.rawError = error.response?.data?.detail || error.message || "配置文件读取失败。" }
+      } catch (error) { this.rawError = apiErrorDetail(error, "配置文件读取失败。"); this.$set(this.rawLoaded, file, false) }
     },
     async validateRaw() {
-      this.validating = true; this.rawError = ""
+      if (!this.rawReady) return
+      this.validating = true; this.rawError = ""; this.rawIssues = []
       try {
         const response = await this.postRequest(`${this.$root.prefix}/system/configuration/validate`, { file: this.rawFile, content: this.rawContent })
         if (!response.suc) throw new Error(response.info)
         this.$message.success("配置语法检查通过。")
-      } catch (error) { this.rawError = error.response?.data?.detail || error.message || "配置校验失败。" }
+      } catch (error) { this.rawIssues = apiErrorIssues(error); this.rawError = apiErrorDetail(error, "配置校验失败。") }
       finally { this.validating = false }
     },
     async saveRaw() {
-      if (!this.rawLoaded[this.rawFile]) await this.loadRaw(this.rawFile)
-      this.saving = "raw"; this.rawError = ""
+      if (!this.rawReady) return
+      this.saving = "raw"; this.rawError = ""; this.rawIssues = []
       try {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/${this.rawFile}`, { expected_revision: this.rawRevision, content: this.rawContent })
         if (!response.suc) throw new Error(response.info)
@@ -192,7 +195,7 @@ export default {
         if (response.data.restart_available) await this.restart(response.data.access_urls || [])
         else if (response.data.restart_required) this.$message.warning("配置已保存，请手动重启真寻后生效。")
         else await this.loadSummary()
-      } catch (error) { this.rawError = error.response?.data?.detail || error.message || "保存失败。" }
+      } catch (error) { this.rawIssues = apiErrorIssues(error); this.rawError = apiErrorDetail(error, "保存失败。"); if (error.response?.status === 409) this.$set(this.rawLoaded, this.rawFile, false) }
       finally { this.saving = "" }
     },
     async restart(accessUrls) {
@@ -201,15 +204,7 @@ export default {
       this.restartTargets = buildRestartTargets({ mode, customHost: host, port, accessUrls })
       const response = await this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {})
       if (!response.suc) throw new Error(response.info)
-      this.restarting = true; this.restartTimedOut = false
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-        for (const baseUrl of this.restartTargets) {
-          try { const check = await fetch(`${baseUrl}${this.$root.prefix}/configure/status`, { cache: "no-store" }); if (check.ok) { window.location.replace(`${baseUrl}/#/system`); return } }
-          catch (error) { /* Expected while restarting. */ }
-        }
-      }
-      this.restartTimedOut = true
+      startRestartRecovery({ bootId: response.data.boot_id, accessUrls: this.restartTargets, returnRoute: "/system", message: "环境配置将在新进程中生效。" })
     },
   },
   watch: {
@@ -223,6 +218,6 @@ export default {
 .env-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }.field-help { margin-top: 5px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; }.group-search { max-width: 420px; margin-bottom: 14px; }.group-module { margin-left: 10px; color: var(--text-color-secondary); font-family: Consolas, monospace; font-size: 12px; }
 .config-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; padding: 6px 4px 18px; }.config-field { min-width: 0; }.config-label { display: flex; min-height: 38px; flex-direction: column; margin-bottom: 7px; }.config-label span { color: var(--text-color-secondary); font-size: 12px; }.sensitive-placeholder { padding: 11px; border: 1px dashed var(--border-color); border-radius: 5px; color: var(--text-color-secondary); }
 .action-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; padding: 12px 0; border-top: 1px solid var(--border-color); background: var(--bg-color-secondary); }.action-bar span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.raw-switch { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 10px; }.raw-editor ::v-deep textarea { font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.55; }.inline-error { margin-top: 8px; color: var(--el-color-danger); }
-.restart-overlay { position: fixed; inset: 0; z-index: 5000; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 24px; background: rgba(250, 251, 253, .97); color: #30333a; text-align: center; }.restart-overlay > i { color: #c74e80; font-size: 42px; }.restart-addresses { display: flex; flex-direction: column; gap: 7px; }.restart-addresses a { color: #b63d70; }
+.validation-issues { margin: 10px 0 0; padding: 10px 14px 10px 34px; border: 1px solid rgba(224,82,96,.35); border-radius: 6px; color: var(--danger-color); background: rgba(224,82,96,.06); }.validation-issues li { margin: 4px 0; line-height: 1.55; }.validation-issues code { margin-right: 8px; }
 @media (max-width: 760px) { .env-form, .config-fields { grid-template-columns: 1fr; }.configuration-toolbar { align-items: flex-start; }.action-bar { flex-wrap: wrap; }.action-bar span { width: 100%; }.raw-switch { gap: 10px; } }
 </style>

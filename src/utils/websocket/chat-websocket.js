@@ -4,6 +4,7 @@ import vue from "@/main"
 import {
   createAuthenticatedWebSocket,
   emitWebSocketState,
+  handleAuthenticatedWebSocketClose,
 } from "./create-websocket"
 
 var ws = null
@@ -124,12 +125,17 @@ export default {
         emitWebSocketState("chat", "connected")
       }
       websocket.onmessage = chatWebsocketOnmessage
-      websocket.onclose = () => {
+      websocket.onclose = (event) => {
         if (ws === websocket) {
           ws = null
           this.ws = null
         }
         stopHeartbeat()
+        if (handleAuthenticatedWebSocketClose(event)) {
+          reconnectEnabled = false
+          emitWebSocketState("chat", "idle")
+          return
+        }
         if (reconnectEnabled) scheduleReconnect(this)
         else emitWebSocketState("chat", "idle")
       }

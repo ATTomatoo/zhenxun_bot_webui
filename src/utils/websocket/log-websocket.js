@@ -3,6 +3,7 @@
 import {
   createAuthenticatedWebSocket,
   emitWebSocketState,
+  handleAuthenticatedWebSocketClose,
 } from "./create-websocket"
 
 var ws = null
@@ -50,12 +51,17 @@ export default {
         emitWebSocketState("log", "connected")
       }
       websocket.onmessage = onMessage
-      websocket.onclose = () => {
+      websocket.onclose = (event) => {
         if (ws === websocket) {
           ws = null
           this.ws = null
         }
         stopHeartbeat()
+        if (handleAuthenticatedWebSocketClose(event)) {
+          reconnectEnabled = false
+          emitWebSocketState("log", "idle")
+          return
+        }
         if (reconnectEnabled) scheduleReconnect(onMessage, this)
         else emitWebSocketState("log", "idle")
       }

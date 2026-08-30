@@ -1,7 +1,9 @@
 import axios from "axios"
 import { Message } from "element-ui"
-import router from "../router"
-import { clearAllDirtyStates } from "./dirty-state"
+import {
+  handleAuthenticationExpired,
+  isLocalAuthRecoveryRequest,
+} from "./auth-session"
 
 let lastErrorKey = ""
 let lastErrorAt = 0
@@ -48,24 +50,28 @@ axios.interceptors.response.use(
     return success.data
   },
   (error) => {
-    if (error.config && error.config.suppressErrorToast) {
-      return Promise.reject(error)
-    }
     const response = error.response
+    const suppressToast = Boolean(error.config?.suppressErrorToast)
     if (!response) {
-      showErrorOnce("无法连接到真寻服务，请检查服务状态和地址设置。")
+      if (!suppressToast) {
+        showErrorOnce("无法连接到真寻服务，请检查服务状态和地址设置。")
+      }
       return Promise.reject(error)
     }
     const { status, data } = response
     const detail = Array.isArray(data?.detail)
       ? data.detail[0]?.msg
+      : data?.detail && typeof data.detail === "object"
+      ? data.detail.issues?.[0]?.message || data.detail.message
       : data?.detail
     if (status === 401) {
-      showErrorOnce("登录会话已失效，请重新登录。")
-      clearCookie("tokenStr")
-      window.sessionStorage.removeItem("isAuthenticated")
-      clearAllDirtyStates()
-      if (router.currentRoute.path !== "/") router.replace("/")
+      if (!isLocalAuthRecoveryRequest(error.config)) {
+        handleAuthenticationExpired(!suppressToast)
+      } else if (!suppressToast) {
+        showErrorOnce(detail || "当前恢复会话已失效。")
+      }
+    } else if (suppressToast) {
+      return Promise.reject(error)
     } else if (status === 403) {
       showErrorOnce(detail || "当前来源或账户无权执行此操作。")
     } else if (status === 404) {
@@ -195,11 +201,12 @@ export const getRequest = (url, params, config = {}) => {
   })
 }
 //传递json的delete请求
-export const deleteRequest = (url, params) => {
+export const deleteRequest = (url, params, config = {}) => {
   if (!url.startsWith("http")) {
     url = `${getBaseUrl()}${url}`
   }
   return axios({
+    ...config,
     method: "delete",
     url: url,
     data: params,

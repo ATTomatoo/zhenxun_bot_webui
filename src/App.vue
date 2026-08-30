@@ -1,13 +1,16 @@
 <template>
   <div id="app" :style="{ height: computedHeight + 'px' }">
     <router-view />
+    <restart-recovery-overlay />
   </div>
 </template>
 
 <script>
 import { getBaseUrlLocalStorage, setBaseApiUrl } from "@/utils/api"
+import RestartRecoveryOverlay from "@/components/system/RestartRecoveryOverlay"
 export default {
   name: "App",
+  components: { RestartRecoveryOverlay },
   data() {
     return {
       windowHeight: window.innerHeight,
