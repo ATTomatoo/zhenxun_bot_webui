@@ -4,7 +4,8 @@
     :title="title"
     :width="dialogWidth"
     custom-class="kawaii-dialog"
-    @close="handleClose"
+    :before-close="confirmClose"
+    @closed="handleClosed"
   >
     <div class="kawaii-editor-container">
       <!-- 文件信息展示 -->
@@ -87,6 +88,7 @@
 import CodeMirror from "./CodeMirror.vue"
 import SvgIcon from "../SvgIcon/SvgIcon.vue"
 import MyButton from "../ui/MyButton.vue"
+import { clearDirtyState, setDirtyState } from "@/utils/dirty-state"
 import "codemirror/addon/scroll/simplescrollbars"
 import "codemirror/addon/scroll/simplescrollbars.css"
 
@@ -128,6 +130,8 @@ export default {
       scrollbarStyle: "simple", // 使用简单滚动条
       lineWrapping: true,
       editorContent: "",
+      initialContent: "",
+      dirtySource: `system-file-${this._uid}`,
       innerVisible: true,
       cursorLine: 1,
       cursorCol: 1,
@@ -166,6 +170,12 @@ export default {
     },
   },
   watch: {
+    editorContent(value) {
+      setDirtyState(
+        this.dirtySource,
+        !this.readOnly && value !== this.initialContent
+      )
+    },
     language(newLang) {
       this.editorOptions.mode = this.getModeFromLanguage(newLang)
       if (this.$refs.editor) {
@@ -180,6 +190,7 @@ export default {
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.setupResponsive)
+    clearDirtyState(this.dirtySource)
   },
   methods: {
     handleSave() {
@@ -189,6 +200,8 @@ export default {
         content: this.editorContent,
       }).then((resp) => {
         if (resp.suc) {
+          this.initialContent = this.editorContent
+          clearDirtyState(this.dirtySource)
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
@@ -210,8 +223,9 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.editorContent = resp.data
+            this.initialContent = resp.data
+            clearDirtyState(this.dirtySource)
           }
         } else {
           this.$message.error(resp.info)
@@ -281,8 +295,25 @@ export default {
       this.$emit("execute", this.editorContent)
     },
 
-    handleClose() {
-      this.innerVisible = false
+    confirmClose(done) {
+      if (this.readOnly || this.editorContent === this.initialContent) {
+        done()
+        return
+      }
+      this.$confirm("文件内容尚未保存，确定放弃修改吗？", "关闭编辑器", {
+        confirmButtonText: "放弃修改",
+        cancelButtonText: "继续编辑",
+        type: "warning",
+      })
+        .then(() => {
+          clearDirtyState(this.dirtySource)
+          done()
+        })
+        .catch(() => {})
+    },
+
+    handleClosed() {
+      clearDirtyState(this.dirtySource)
       this.$emit("update:visible", false)
       this.$emit("close")
     },

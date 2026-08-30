@@ -1,10 +1,14 @@
 // import router from "@/router/routers" //引入router, 作页面跳转
 // import store from "@/store" //引入store, 作聊天消息存储
 import vue from "@/main"
-import { createAuthenticatedWebSocket } from "./create-websocket"
+import {
+  createAuthenticatedWebSocket,
+  emitWebSocketState,
+} from "./create-websocket"
 
 var ws = null
 var heartbeatInterval = null
+var reconnectTimer = null
 var reconnectEnabled = true
 
 function startHeartbeat() {
@@ -17,8 +21,18 @@ function startHeartbeat() {
 
 function stopHeartbeat() {
   if (heartbeatInterval) {
-    clearInterval(heartbeatInterval) // 停止心跳检测定时器
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
   }
+}
+
+function scheduleReconnect(context) {
+  if (!reconnectEnabled || reconnectTimer) return
+  emitWebSocketState("chat", "reconnecting")
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (reconnectEnabled) context.initWebSocket()
+  }, 3000)
 }
 
 async function chatWebsocketOnmessage(event) {
@@ -99,12 +113,14 @@ export default {
   initWebSocket: function () {
     reconnectEnabled = true
     if (!ws) {
+      emitWebSocketState("chat", "connecting")
       const websocket = createAuthenticatedWebSocket("/zhenxun/socket/chat")
       ws = websocket
       this.ws = websocket
       startHeartbeat()
       websocket.onopen = () => {
         console.log("CHAT WebSocket 已连接...")
+        emitWebSocketState("chat", "connected")
       }
       websocket.onmessage = chatWebsocketOnmessage
       websocket.onclose = () => {
@@ -112,11 +128,9 @@ export default {
           ws = null
           this.ws = null
         }
-        vue.$message.warning("CHAT WebSocket 已断开...")
         stopHeartbeat()
-        if (reconnectEnabled) {
-          setTimeout(() => this.initWebSocket(), 3000)
-        }
+        if (reconnectEnabled) scheduleReconnect(this)
+        else emitWebSocketState("chat", "idle")
       }
     }
   },
@@ -124,6 +138,12 @@ export default {
   closeWebSocket: function () {
     console.log("关闭ws")
     reconnectEnabled = false
+    emitWebSocketState("chat", "idle")
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    stopHeartbeat()
     if (ws && ws.readyState <= WebSocket.OPEN) {
       ws.close()
     }

@@ -1,5 +1,10 @@
 module.exports = {
-  content: ["./index.html", "./src/**/*.{vue,js,ts,jsx,tsx}"],
+  purge: {
+    content: ["./public/index.html", "./src/**/*.{vue,js,ts,jsx,tsx}"],
+    options: {
+      safelist: ["ring-2", "ring-purple-200"],
+    },
+  },
   theme: {
     extend: {
       colors: {

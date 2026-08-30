@@ -12,7 +12,7 @@
 
         <!-- 顶部logo - 方形设计 -->
         <div class="logo-container">
-          <img src="@/assets/image/logo.png" alt="Logo" class="main-logo" />
+          <img :src="logoUrl" alt="Logo" class="main-logo" />
         </div>
 
         <!-- 内容区域 -->
@@ -89,7 +89,7 @@
 
         <!-- 底部装饰图片 -->
         <div class="bottom-decoration">
-          <img src="@/assets/image/cute0.png" alt="Cute character" />
+          <img :src="cuteUrl" alt="Cute character" />
         </div>
       </div>
 
@@ -102,8 +102,14 @@
 </template>
 
 <script>
+import logoUrl from "@/assets/image/logo.png"
+import cuteUrl from "@/assets/image/cute0.png"
+
 export default {
   name: "AboutPage",
+  data() {
+    return { logoUrl, cuteUrl }
+  },
   mounted() {
     // 平滑滚动到锚点
     if (this.$route.hash) {

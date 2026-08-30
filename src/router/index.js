@@ -1,18 +1,33 @@
 import Vue from "vue"
 import VueRouter from "vue-router"
+import { MessageBox } from "element-ui"
 import Login from "@/views/Login"
 import Home from "@/views/Home"
-import MyApi from "@/views/MyApi"
-import PluginManage from "@/views/plugin/PluginManage"
-import StoreManage from "@/views/store/StoreManage"
-import MainCommand from "@/views/command/MainCommand"
-import FriendGroupManage from "@/views/manage/FriendGroupManage"
-import DatabaseManage from "@/views/database/DatabaseManage"
-import MainDashboard from "@/views/dashboard/MainDashboard"
-import SystemInfo from "@/views/system/SystemInfo"
-import Configure from "@/views/configure/Configure"
-import About from "@/views/about/About"
-import ProtocolSetting from "@/views/protocol/ProtocolSetting"
+import { clearAllDirtyStates, hasDirtyState } from "@/utils/dirty-state"
+
+const MyApi = () => import(/* webpackChunkName: "address" */ "@/views/MyApi")
+const PluginManage = () =>
+  import(/* webpackChunkName: "plugins" */ "@/views/plugin/PluginManage")
+const StoreManage = () =>
+  import(/* webpackChunkName: "store" */ "@/views/store/StoreManage")
+const MainCommand = () =>
+  import(/* webpackChunkName: "command" */ "@/views/command/MainCommand")
+const FriendGroupManage = () =>
+  import(/* webpackChunkName: "manage" */ "@/views/manage/FriendGroupManage")
+const DatabaseManage = () =>
+  import(/* webpackChunkName: "database" */ "@/views/database/DatabaseManage")
+const MainDashboard = () =>
+  import(/* webpackChunkName: "dashboard" */ "@/views/dashboard/MainDashboard")
+const SystemInfo = () =>
+  import(/* webpackChunkName: "system" */ "@/views/system/SystemInfo")
+const Configure = () =>
+  import(/* webpackChunkName: "configure" */ "@/views/configure/Configure")
+const About = () =>
+  import(/* webpackChunkName: "about" */ "@/views/about/About")
+const ProtocolSetting = () =>
+  import(/* webpackChunkName: "protocol" */ "@/views/protocol/ProtocolSetting")
+const ConsoleConnect = () =>
+  import(/* webpackChunkName: "connect" */ "@/views/ConsoleConnect")
 
 Vue.use(VueRouter)
 
@@ -31,6 +46,11 @@ const routes = [
     path: "/configure",
     name: "Configure",
     component: Configure,
+  },
+  {
+    path: "/connect",
+    name: "ConsoleConnect",
+    component: ConsoleConnect,
   },
   {
     path: "/home",
@@ -62,10 +82,31 @@ const router = new VueRouter({
   },
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const isAuthenticated = window.sessionStorage.getItem("isAuthenticated")
 
-  if (!["/", "/myapi", "/configure"].includes(to.path) && !isAuthenticated) {
+  if (to.path !== from.path && hasDirtyState()) {
+    try {
+      await MessageBox.confirm(
+        "当前页面有尚未保存的修改，离开后这些修改会丢失。",
+        "离开当前页面？",
+        {
+          confirmButtonText: "放弃修改并离开",
+          cancelButtonText: "继续编辑",
+          type: "warning",
+        }
+      )
+      clearAllDirtyStates()
+    } catch (error) {
+      next(false)
+      return
+    }
+  }
+
+  if (
+    !["/", "/myapi", "/configure", "/connect"].includes(to.path) &&
+    !isAuthenticated
+  ) {
     next("/") // 重定向到登录页面
   } else {
     next()

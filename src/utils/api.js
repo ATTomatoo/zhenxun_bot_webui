@@ -1,6 +1,19 @@
 import axios from "axios"
 import { Message } from "element-ui"
 import router from "../router"
+import { clearAllDirtyStates } from "./dirty-state"
+
+let lastErrorKey = ""
+let lastErrorAt = 0
+
+const showErrorOnce = (message) => {
+  const value = String(message || "请求处理失败，请稍后重试。")
+  const now = Date.now()
+  if (value === lastErrorKey && now - lastErrorAt < 5000) return
+  lastErrorKey = value
+  lastErrorAt = now
+  Message.error({ message: value })
+}
 
 // 请求拦截器
 axios.interceptors.request.use(
@@ -35,35 +48,34 @@ axios.interceptors.response.use(
     return success.data
   },
   (error) => {
-    try {
-      const { status, data } = error.response
-      if (status == 504 || status == 404) {
-        Message.error({ message: "服务器被吃了┭┮﹏┭┮" })
-      } else if (status == 405) {
-        Message.error({ message: "真寻的api地址不正确捏" })
-      } else if (status == 400) {
-        Message.error(data.detail)
-        let path = router.currentRoute.path
-        if (path != "/") {
-          //如果当前页面不是登陆页面
-          router.replace("/")
-        }
-      } else {
-        if (data && typeof data.detail === "string") {
-          Message.error({ message: data.detail })
-        } else if (data && Array.isArray(data.detail) && data.detail.length) {
-          Message.error({ message: data.detail[0].msg })
-        } else {
-          Message.error({ message: "发生错误啦!" })
-        }
-      }
-    } catch (e) {
-      if (error.request) {
-        Message.error({
-          message: "网络连接好像不通畅哦，请检查服务器与地址设置...",
-        })
-        return Promise.reject(error)
-      }
+    if (error.config && error.config.suppressErrorToast) {
+      return Promise.reject(error)
+    }
+    const response = error.response
+    if (!response) {
+      showErrorOnce("无法连接到真寻服务，请检查服务状态和地址设置。")
+      return Promise.reject(error)
+    }
+    const { status, data } = response
+    const detail = Array.isArray(data?.detail)
+      ? data.detail[0]?.msg
+      : data?.detail
+    if (status === 401) {
+      showErrorOnce("登录会话已失效，请重新登录。")
+      clearCookie("tokenStr")
+      window.sessionStorage.removeItem("isAuthenticated")
+      clearAllDirtyStates()
+      if (router.currentRoute.path !== "/") router.replace("/")
+    } else if (status === 403) {
+      showErrorOnce(detail || "当前来源或账户无权执行此操作。")
+    } else if (status === 404) {
+      showErrorOnce("请求的服务接口不存在，请检查前后端版本。")
+    } else if (status === 405) {
+      showErrorOnce("服务地址或请求方式不正确。")
+    } else if (status === 504) {
+      showErrorOnce("服务响应超时，请稍后重试。")
+    } else {
+      showErrorOnce(detail || "请求处理失败，请稍后重试。")
     }
     return Promise.reject(error)
   }
@@ -217,12 +229,14 @@ export const getBaseUrlLocalStorage = () => {
 }
 
 //设置cookie方法
-export const setCookie = (name, value) => {
-  var Days = 7 //有效期7天
+export const setCookie = (name, value, days = 7) => {
+  var Days = days
   var exp = new Date()
   exp.setTime(exp.getTime() + Days * 24 * 60 * 60 * 1000)
-  document.cookie =
-    name + "=" + encodeURI(value) + ";expires=" + exp.toGMTString()
+  const secure = window.location.protocol === "https:" ? ";Secure" : ""
+  document.cookie = `${name}=${encodeURIComponent(
+    value
+  )};expires=${exp.toUTCString()};path=/;SameSite=Strict${secure}`
 }
 
 //获取cookie方法
@@ -231,7 +245,7 @@ export const getCookie = (name) => {
     reg = new RegExp("(^| )" + name + "=([^;]*)(;|$)")
   if (document.cookie.match(reg)) {
     arr = document.cookie.match(reg)
-    return decodeURI(arr[2])
+    return decodeURIComponent(arr[2])
   } else return null
 }
 

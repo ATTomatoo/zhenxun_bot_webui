@@ -3,7 +3,7 @@
     <section class="setup-workspace" v-loading="initializing">
       <header class="setup-header">
         <div class="brand-block">
-          <img src="@/assets/image/logo.png" alt="真寻" class="brand-logo" />
+          <img :src="logoUrl" alt="真寻" class="brand-logo" />
           <div>
             <p class="brand-kicker">ZHENXUN BOT</p>
             <h1>首次配置</h1>
@@ -23,37 +23,26 @@
 
       <div v-else-if="!claimed" class="claim-layout">
         <div class="claim-copy">
-          <span class="section-number">安全验证</span>
-          <h2>输入启动日志中的配置码</h2>
+          <span class="section-number">需要控制台授权</span>
+          <h2>从本次启动的控制台打开连接链接</h2>
           <p>
-            真寻启动时会在 INFO 日志中输出一次 8 位配置码，有效期 30
-            分钟。验证完成后，本浏览器可继续配置 15 分钟。
+            连接链接会自动完成安全验证并返回这里。链接仅在当前真寻进程运行期间有效，请勿分享。
           </p>
         </div>
-        <el-form @submit.native.prevent class="claim-form">
-          <el-form-item label="一次性配置码">
-            <el-input
-              v-model.trim="claimCode"
-              maxlength="8"
-              autocomplete="one-time-code"
-              placeholder="例如 A1B2C3D4"
-              class="code-input"
-              @keyup.enter.native="claim"
-            />
-          </el-form-item>
-          <p v-if="claimError" class="inline-result error">
-            <i class="el-icon-circle-close" /> {{ claimError }}
+        <div class="claim-form">
+          <i class="el-icon-link access-icon" />
+          <p class="inline-result" :class="{ error: accessError }">
+            <i :class="accessError ? 'el-icon-circle-close' : 'el-icon-info'" />
+            {{ accessError || "等待控制台连接授权。" }}
           </p>
           <el-button
             type="primary"
-            :loading="claiming"
-            :disabled="claimCode.length !== 8"
             class="primary-action"
-            @click="claim"
+            @click="loadStatus"
           >
-            验证并开始
+            重新检查状态
           </el-button>
-        </el-form>
+        </div>
       </div>
 
       <template v-else>
@@ -304,6 +293,8 @@
 </template>
 
 <script>
+import logoUrl from "@/assets/image/logo.png"
+
 const SETUP_TOKEN_KEY = "zhenxunSetupToken"
 const RESTART_RECEIPT_KEY = "zhenxunSetupRestartReceipt"
 
@@ -336,12 +327,11 @@ export default {
   components: { ProbeResult },
   data() {
     return {
+      logoUrl,
       initializing: true,
       serverState: "unconfigured",
       claimed: false,
-      claimCode: "",
-      claimError: "",
-      claiming: false,
+      accessError: "",
       step: 0,
       stepTitles: ["管理员", "数据服务", "监听地址", "检查并启动"],
       account: { username: "admin", password: "", confirmPassword: "", superusers: "" },
@@ -438,6 +428,7 @@ export default {
         const response = await this.getRequest(`${this.$root.prefix}/configure/status`)
         this.serverState = response.data.state
         if (this.serverState === "configured") {
+          this.clearSetupState()
           this.$router.replace("/")
           return
         }
@@ -457,23 +448,17 @@ export default {
         this.initializing = false
       }
     },
-    async claim() {
-      this.claiming = true
-      this.claimError = ""
-      try {
-        const response = await this.postRequest(`${this.$root.prefix}/configure/claim`, { code: this.claimCode.toUpperCase() })
-        window.sessionStorage.setItem(SETUP_TOKEN_KEY, response.data.token)
-        this.claimed = true
-        await this.loadDraft()
-      } catch (error) {
-        this.claimError = (error.response && error.response.data && error.response.data.detail) || "验证失败，请检查启动日志。"
-      } finally {
-        this.claiming = false
-      }
+    clearSetupState() {
+      window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
+      window.sessionStorage.removeItem(RESTART_RECEIPT_KEY)
     },
     async loadDraft() {
       try {
-        const response = await this.getRequest(`${this.$root.prefix}/configure/draft`, null, this.setupHeaders)
+        const response = await this.getRequest(
+          `${this.$root.prefix}/configure/draft`,
+          null,
+          { ...this.setupHeaders, suppressErrorToast: true }
+        )
         const draft = response.data
         this.account.username = draft.username || "admin"
         Object.assign(this.database, draft.database || {})
@@ -482,8 +467,10 @@ export default {
         this.detectedAddresses = draft.detected_addresses || []
       } catch (error) {
         if (error.response && [401, 409].includes(error.response.status)) {
-          window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
+          this.clearSetupState()
           this.claimed = false
+          this.accessError =
+            "配置授权已失效，请重新打开本次启动控制台中的连接链接。"
         }
       }
     },
@@ -635,7 +622,7 @@ h1 { font-family: "fzrzFont", sans-serif; font-size: 25px; letter-spacing: 0; }
 .claim-copy h2, .step-intro h2 { margin-top: 8px; font-size: 23px; }
 .section-number { color: #c74e80; font-size: 12px; font-weight: 800; }
 .claim-form { padding-left: 36px; border-left: 1px solid #e6e8ed; }
-.code-input ::v-deep input { height: 52px; font-size: 22px; font-weight: 700; text-align: center; text-transform: uppercase; }
+.access-icon { display: block; margin-bottom: 20px; color: #d85f82; font-size: 34px; }
 .primary-action { width: 100%; height: 44px; margin-top: 12px; }
 .desktop-steps { padding: 26px 48px 10px; }
 .mobile-progress { display: none; }

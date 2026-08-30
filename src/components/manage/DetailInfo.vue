@@ -12,7 +12,7 @@
       class="flex flex-col items-center justify-center h-full"
     >
       <img
-        src="@/assets/image/empty.png"
+        :src="emptyDetailUrl"
         class="w-64 h-64 object-contain mb-4"
         alt="空空如也"
       />
@@ -259,6 +259,7 @@
 </template>
 
 <script>
+import emptyDetailUrl from "@/assets/image/empty.png"
 import MyButton from "../ui/MyButton.vue"
 import MySwitch from "../ui/MySwitch.vue"
 
@@ -269,6 +270,7 @@ export default {
   name: "DetailInfo",
   data() {
     return {
+      emptyDetailUrl,
       sizeMana: {
         avaSize: 100,
       },
@@ -386,10 +388,11 @@ export default {
       this.initChart(data.like_plugin)
       this.$emit("startChat", this.data)
     },
-    initChart(likePluginObj) {
+    async initChart(likePluginObj) {
+      const echarts = await this.$loadEcharts()
       this.$nextTick(() => {
         if (!this.likePluginChart) {
-          this.likePluginChart = this.$echarts.init(this.$refs.likePluginChart)
+          this.likePluginChart = echarts.init(this.$refs.likePluginChart)
         }
 
         const likePluginList = Object.keys(likePluginObj)
