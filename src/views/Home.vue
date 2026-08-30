@@ -20,7 +20,7 @@
               <img
                 v-if="!isCollapsed"
                 class="w-48 h-24 object-contain animate-bounce-slow transition-opacity duration-300"
-                src="../assets/image/logo.png"
+                :src="logoUrl"
                 alt="Logo"
               />
             </div>
@@ -352,6 +352,7 @@
 
 <script>
 import AccountSecurityDialog from "@/components/account/AccountSecurityDialog"
+import logoUrl from "@/assets/image/logo.png"
 import EventBus from "@/utils/event-bus"
 import { clearCookie } from "@/utils/api"
 import { getHeaderHeight } from "@/utils/utils"
@@ -361,6 +362,7 @@ export default {
   data() {
     return {
       accountSecurityVisible: false,
+      logoUrl,
       menuSearch: "",
       socketStates: { status: "connecting", log: "idle", chat: "idle" },
       asideShow: false, // 默认隐藏菜单栏，移动端会覆盖这个值
