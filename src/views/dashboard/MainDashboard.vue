@@ -246,9 +246,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.runtime-page { min-height: 100%; padding: 24px; overflow: auto; color: var(--text-color); background: linear-gradient(90deg, var(--border-color) 1px, transparent 1px), linear-gradient(var(--border-color) 1px, transparent 1px), var(--bg-color); background-size: 48px 48px; }
+.runtime-page { min-height: 100%; padding: 24px; overflow: auto; color: var(--text-color); background: var(--bg-color); }
 .runtime-hero, .section-heading, .hero-actions, .service-item, .issue-row, .bot-row, .details-toggle { display: flex; align-items: center; }
-.runtime-hero { min-height: 150px; justify-content: space-between; gap: 24px; padding: 28px 32px; border-left: 5px solid var(--el-color-info); background: var(--bg-color-secondary); box-shadow: 0 8px 24px rgba(20, 24, 31, 0.08); }
+.runtime-hero { min-height: 140px; justify-content: space-between; gap: 24px; padding: 26px 28px; border: 1px solid var(--border-color); border-left: 4px solid var(--el-color-info); border-radius: 8px; background: var(--bg-color-secondary); }
 .runtime-hero.is-ok { border-left-color: var(--el-color-success); }
 .runtime-hero.is-warning { border-left-color: var(--el-color-warning); }
 .runtime-hero.is-critical { border-left-color: var(--el-color-danger); }
@@ -261,7 +261,7 @@ export default {
 .inline-error { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 12px 16px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); border: 1px solid var(--el-color-danger-light-7); }
 .inline-error span { flex: 1; }
 .inline-error button { color: inherit; font-weight: 700; }
-.service-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; border: 1px solid var(--border-color); background: var(--bg-color-secondary); }
+.service-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; overflow: hidden; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color-secondary); }
 .service-item { min-height: 82px; gap: 12px; padding: 14px 18px; border-right: 1px solid var(--border-color); }
 .service-item:last-child { border-right: 0; }
 .service-item > div { min-width: 0; flex: 1; }
@@ -271,7 +271,7 @@ export default {
 .status-dot.is-ok { background: var(--el-color-success); }
 .status-dot.is-warning { background: var(--el-color-warning); }
 .status-dot.is-critical { background: var(--el-color-danger); }
-.page-section, .details-section { margin-top: 20px; padding: 24px; border: 1px solid var(--border-color); background: var(--bg-color-secondary); }
+.page-section, .details-section { margin-top: 16px; padding: 22px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color-secondary); }
 .section-heading { justify-content: space-between; margin-bottom: 18px; }
 .section-heading h2 { font-size: 20px; }
 .count-badge { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border-color); border-radius: 50%; color: var(--text-color-secondary); }
@@ -301,5 +301,5 @@ export default {
 .details-toggle { width: 100%; justify-content: space-between; padding: 20px 24px; color: var(--text-color); }
 .details-toggle > span { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 @media (max-width: 1100px) { .service-strip, .daily-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .service-item:nth-child(2), .daily-grid > div:nth-child(2) { border-right: 0; } .service-item:nth-child(-n + 2), .daily-grid > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border-color); } }
-@media (max-width: 700px) { .runtime-page { padding: 12px; background-size: 32px 32px; } .runtime-hero { min-height: 0; align-items: flex-start; flex-direction: column; padding: 22px; } .runtime-hero h1 { font-size: 23px; } .hero-actions { width: 100%; justify-content: space-between; } .service-strip, .daily-grid { grid-template-columns: 1fr; } .service-item, .daily-grid > div { border-right: 0; border-bottom: 1px solid var(--border-color); } .service-item:last-child, .daily-grid > div:last-child { border-bottom: 0; } .page-section { padding: 18px; } .issue-row { align-items: flex-start; flex-wrap: wrap; padding: 14px 0; } .issue-row .el-button { margin-left: 34px; } .bot-adapter { display: none; } }
+@media (max-width: 700px) { .runtime-page { padding: 12px; } .runtime-hero { min-height: 0; align-items: flex-start; flex-direction: column; padding: 22px; } .runtime-hero h1 { font-size: 23px; } .hero-actions { width: 100%; justify-content: space-between; } .service-strip, .daily-grid { grid-template-columns: 1fr; } .service-item, .daily-grid > div { border-right: 0; border-bottom: 1px solid var(--border-color); } .service-item:last-child, .daily-grid > div:last-child { border-bottom: 0; } .page-section { padding: 18px; } .issue-row { align-items: flex-start; flex-wrap: wrap; padding: 14px 0; } .issue-row .el-button { margin-left: 34px; } .bot-adapter { display: none; } }
 </style>

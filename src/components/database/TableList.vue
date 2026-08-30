@@ -17,12 +17,11 @@
     </div>
 
     <div
-      class="table-list-box rounded-xl"
+      class="table-list-box"
       :style="{
         height: computedHeight + 'px',
         overflow: 'auto',
         background: 'var(--el-bg-color-overlay)',
-        boxShadow: 'var(--el-box-shadow-light)',
         border: '1px solid var(--el-border-color-light)',
       }"
     >
@@ -145,7 +144,6 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.tableColumn[tableName] = resp.data
             this.reloadKey++
           }
@@ -169,7 +167,6 @@ export default {
             if (resp.warning) {
               this.$message.warning(resp.warning)
             } else {
-              this.$message.success(resp.info)
               this.tableList = resp.data
             }
           } else {
@@ -187,6 +184,9 @@ export default {
 </script>
 
 <style scoped>
+.table-list-box {
+  border-radius: 8px;
+}
 .title {
   position: relative;
   display: inline-block;

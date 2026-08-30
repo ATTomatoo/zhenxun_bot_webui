@@ -2,7 +2,7 @@
   <div ref="midInfo" class="mid-info text-gray-800 p-4 flex flex-col h-full">
     <!-- 消息接收区域 -->
     <div
-      class="message-area rounded-xl shadow-md p-4 mb-4"
+      class="metric-panel message-area p-4 mb-3"
       :style="{
         height: areaHeight + 'px',
         backgroundColor: 'var(--bg-color-secondary)',
@@ -14,13 +14,13 @@
           class="text-md font-bold flex items-center"
           :style="{ color: 'var(--primary-color)' }"
         >
-          <span class="mr-2">(◕‿◕✿)</span>消息接收
+          消息接收
         </p>
         <span
           class="text-xs ml-3"
           :style="{ color: 'var(--text-color-secondary)' }"
         >
-          勇者结识伙伴，收到的问候，口才+1
+          实时统计
         </span>
       </div>
 
@@ -65,7 +65,7 @@
 
     <!-- 功能调用区域 -->
     <div
-      class="function-area rounded-xl shadow-md p-4 mb-4"
+      class="metric-panel function-area p-4 mb-3"
       :style="{
         height: areaHeight + 'px',
         backgroundColor: 'var(--bg-color-secondary)',
@@ -77,13 +77,13 @@
           class="text-md font-bold flex items-center"
           :style="{ color: 'var(--primary-color)' }"
         >
-          <span class="mr-2">(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧</span>功能调用
+          功能调用
         </p>
         <span
           class="text-xs ml-3"
           :style="{ color: 'var(--text-color-secondary)' }"
         >
-          勇者磨砺自身，辛勤的汗水，力量+1
+          实时统计
         </span>
       </div>
 
@@ -128,7 +128,7 @@
 
     <!-- 图表区域 -->
     <div
-      class="chart-area rounded-xl shadow-md p-4 flex-1 min-h-[100px]"
+      class="metric-panel chart-area p-4 flex-1 min-h-[100px]"
       ref="chartArea"
       :style="{
         height: computedChartHeight + 'px',
@@ -182,6 +182,9 @@ export default {
       chatCntInterval: null,
       callInterval: null,
       chart: null,
+      destroyed: false,
+      sidebarResizeHandler: null,
+      themeChangeHandler: null,
       chatAndCallMonth: {},
       chartOpt: {
         title: {
@@ -355,7 +358,9 @@ export default {
   },
   async mounted() {
     window.addEventListener("resize", this.handleResize)
+    if (!this.botInfo.self_id) return
     const echarts = await this.$loadEcharts()
+    if (this.destroyed || !this.$refs.chart) return
     this.chart = echarts.init(this.$refs.chart)
     this.getChCount(this.botInfo.self_id)
     this.getCallCount(this.botInfo.self_id)
@@ -368,8 +373,10 @@ export default {
     }, 30000)
     this.handleResize()
     this.updateChartTheme()
-    EventBus.$on("sidebar-aside", debounce(this.handleResize, 200))
-    EventBus.$on("change-theme", debounce(this.updateChartTheme, 200))
+    this.sidebarResizeHandler = debounce(this.handleResize, 200)
+    this.themeChangeHandler = debounce(this.updateChartTheme, 200)
+    EventBus.$on("sidebar-aside", this.sidebarResizeHandler)
+    EventBus.$on("change-theme", this.themeChangeHandler)
   },
   computed: {
     computedChartHeight() {
@@ -380,6 +387,7 @@ export default {
     },
   },
   beforeDestroy() {
+    this.destroyed = true
     if (this.chatCntInterval) {
       clearInterval(this.chatCntInterval)
     }
@@ -387,8 +395,16 @@ export default {
       clearInterval(this.callInterval)
     }
     window.removeEventListener("resize", this.handleResize)
-    EventBus.$off("sidebar-aside", this.handleResize)
-    EventBus.$off("change-theme", this.updateChartTheme)
+    if (this.sidebarResizeHandler) {
+      EventBus.$off("sidebar-aside", this.sidebarResizeHandler)
+      this.sidebarResizeHandler.cancel()
+    }
+    if (this.themeChangeHandler) {
+      EventBus.$off("change-theme", this.themeChangeHandler)
+      this.themeChangeHandler.cancel()
+    }
+    this.chart?.dispose()
+    this.chart = null
   },
   methods: {
     updateAreaHeight() {
@@ -411,6 +427,7 @@ export default {
     },
 
     handleResize() {
+      if (this.destroyed) return
       const width = window.innerWidth
       const height = window.innerHeight
 
@@ -445,6 +462,7 @@ export default {
       this.updateAreaHeight()
 
       this.$nextTick(() => {
+        if (this.destroyed || !this.$refs.midInfo || !this.chart) return
         this.chartBorderHeight =
           this.$refs.midInfo.offsetHeight - this.areaHeight * 2 - 100
         this.chartBorderHeight = Math.max(this.chartBorderHeight, 180)
@@ -465,23 +483,27 @@ export default {
       return (this.callCnt[type] / this.callCnt.num) * 100
     },
     getMonthChatAndCallCount(bot_id) {
+      if (!bot_id || this.destroyed) return
       var loading = this.getLoading(".chart-area")
       this.getRequest(
         `${this.$root.prefix}/dashboard/get_chat_and_call_month`,
         { bot_id: bot_id }
       ).then((resp) => {
+        if (this.destroyed) {
+          loading.close()
+          return
+        }
         if (resp.suc) {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.chatAndCallMonth = resp.data
             const chartOpt = cloneDeep(this.chartOpt)
             chartOpt.xAxis.data = this.chatAndCallMonth.date
             chartOpt.series[0].data = this.chatAndCallMonth.chat
             chartOpt.series[1].data = this.chatAndCallMonth.call
-            this.chart.setOption(chartOpt)
-            this.chart.resize()
+            this.chart?.setOption(chartOpt)
+            this.chart?.resize()
           }
         } else {
           this.$message.error(resp.info)
@@ -498,15 +520,16 @@ export default {
         this.getRequest(`${this.$root.prefix}/main/get_all_chat_count`, {
           bot_id,
         }).then((resp) => {
+          if (this.destroyed) {
+            loading?.close()
+            return
+          }
           if (resp.suc) {
             if (resp.warning) {
               if (loading) {
                 this.$message.warning(resp.warning)
               }
             } else {
-              if (loading) {
-                this.$message.success(resp.info)
-              }
               this.chCnt = resp.data
             }
           } else {
@@ -529,16 +552,16 @@ export default {
         this.getRequest(`${this.$root.prefix}/main/get_all_call_count`, {
           bot_id,
         }).then((resp) => {
+          if (this.destroyed) {
+            loading?.close()
+            return
+          }
           if (resp.suc) {
             if (resp.warning) {
               if (loading) {
                 this.$message.warning(resp.warning)
               }
             } else {
-              if (loading) {
-                this.$message.success(resp.info)
-              }
-
               this.callCnt = resp.data
             }
           } else {
@@ -553,6 +576,7 @@ export default {
       }
     },
     updateChartTheme() {
+      if (this.destroyed || !this.chart) return
       const chartOpt = {
         title: {
           text: "消息/调用统计",
@@ -723,7 +747,9 @@ export default {
       if (this.chart) {
         this.chart.setOption(chartOpt, true)
       }
-      this.$nextTick(this.chart.resize)
+      this.$nextTick(() => {
+        if (!this.destroyed && this.chart) this.chart.resize()
+      })
     },
   },
 }
@@ -732,6 +758,12 @@ export default {
 <style scoped>
 .mid-info {
   background-color: var(--bg-color);
+}
+
+.metric-panel {
+  border: 1px solid var(--border-color-light);
+  border-radius: 8px;
+  background: var(--bg-color-secondary);
 }
 
 .message-area,

@@ -59,10 +59,20 @@ const routes = [
     redirect: "/dashboard",
     children: [
       { path: "/dashboard", name: "仪表盘", component: MainDashboard },
-      { path: "/command", name: "BOT控制台", component: MainCommand },
+      {
+        path: "/command",
+        name: "BOT控制台",
+        component: MainCommand,
+        meta: { requiresBot: true },
+      },
       { path: "/plugin", name: "插件列表", component: PluginManage },
       { path: "/store", name: "插件商店", component: StoreManage },
-      { path: "/manage", name: "好友/群组", component: FriendGroupManage },
+      {
+        path: "/manage",
+        name: "好友/群组",
+        component: FriendGroupManage,
+        meta: { requiresBot: true },
+      },
       { path: "/database", name: "数据库管理", component: DatabaseManage },
       { path: "/protocol", name: "协议端设置", component: ProtocolSetting },
       { path: "/system", name: "系统信息", component: SystemInfo },

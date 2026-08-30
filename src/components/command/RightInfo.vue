@@ -6,10 +6,10 @@
   >
     <!-- 机器人信息卡片 - 三行垂直布局 -->
     <div
-      class="base-info rounded-xl p-3 shadow-md mb-4"
+      class="base-info command-surface p-3 mb-3"
       :style="{
         backgroundColor: 'var(--bg-color-secondary)',
-        border: '2px solid var(--border-color-light)',
+        border: '1px solid var(--border-color-light)',
       }"
     >
       <div class="space-y-2">
@@ -67,10 +67,10 @@
     <div class="chart-area" :style="{ height: computedChartAreaHeight + 'px' }">
       <!-- 活跃群聊图表 -->
       <div
-        class="active-group chart-container rounded-xl p-4 shadow-md"
+        class="active-group chart-container command-surface p-4"
         :style="{
           backgroundColor: 'var(--bg-color-secondary)',
-          border: '2px solid var(--border-color-light)',
+          border: '1px solid var(--border-color-light)',
         }"
       >
         <div
@@ -80,10 +80,6 @@
             class="text-base font-bold mb-1 md:mb-0 flex items-center"
             :style="{ color: 'var(--primary-color)' }"
           >
-            <i
-              class="fas fa-users mr-1 animate-bounce text-sm"
-              :style="{ color: 'var(--primary-color-light)' }"
-            ></i>
             活跃群组
           </p>
 
@@ -92,7 +88,7 @@
               v-for="type in timeTypes"
               :key="'group' + type.value"
               @click="clickGroupType(type.value)"
-              class="px-2 py-0.5 text-[10px] rounded-full transition-all duration-200"
+              class="time-filter px-2 py-0.5 text-[10px] transition-all duration-200"
               :style="{
                 backgroundColor:
                   selectGroupType === type.value
@@ -118,10 +114,10 @@
 
       <!-- 热门插件图表 -->
       <div
-        class="hot-plugin chart-container rounded-xl p-4 shadow-md"
+        class="hot-plugin chart-container command-surface p-4"
         :style="{
           backgroundColor: 'var(--bg-color-secondary)',
-          border: '2px solid var(--border-color-light)',
+          border: '1px solid var(--border-color-light)',
         }"
       >
         <div
@@ -131,10 +127,6 @@
             class="text-base font-bold mb-1 md:mb-0 flex items-center"
             :style="{ color: 'var(--primary-color)' }"
           >
-            <i
-              class="fas fa-plug mr-1 animate-pulse text-sm"
-              :style="{ color: 'var(--primary-color-light)' }"
-            ></i>
             热门插件
           </p>
 
@@ -143,7 +135,7 @@
               v-for="type in timeTypes"
               :key="'plugin' + type.value"
               @click="clickHotPluginType(type.value)"
-              class="px-2 py-0.5 text-[10px] rounded-full transition-all duration-200"
+              class="time-filter px-2 py-0.5 text-[10px] transition-all duration-200"
               :style="{
                 backgroundColor:
                   selectHotPluginType === type.value
@@ -189,19 +181,17 @@ export default {
       chartAreaHeight: 0,
       activeGroupData: [],
       hotPluginData: [],
-      botInfo: {
-        connect_count: 42,
-        connectTime: "12:34:56",
-        connect_date: "2023-10-15",
-        connect_time: Date.now() / 1000 - 45296, // 示例数据
-        self_id: "123456",
-      },
+      botInfo: {},
       selectGroupType: "all",
       selectHotPluginType: "all",
       groupChart: null,
       hotPluginChart: null,
       groupCntInterval: null,
       timer: null,
+      destroyed: false,
+      resizeHandler: null,
+      sidebarResizeHandler: null,
+      themeChangeHandler: null,
     }
   },
   computed: {
@@ -225,27 +215,52 @@ export default {
     }
   },
   async mounted() {
+    if (!this.botInfo.self_id) return
     await this.initCharts()
+    if (this.destroyed) return
     this.setupResizeListener()
     this.startTimers()
-    EventBus.$on("sidebar-aside", debounce(this.handleResize, 200))
-    EventBus.$on("change-theme", debounce(this.updateChartTheme, 200))
+    this.sidebarResizeHandler = debounce(this.handleResize, 200)
+    this.themeChangeHandler = debounce(this.updateChartTheme, 200)
+    EventBus.$on("sidebar-aside", this.sidebarResizeHandler)
+    EventBus.$on("change-theme", this.themeChangeHandler)
   },
   beforeDestroy() {
+    this.destroyed = true
     if (this.groupCntInterval) clearInterval(this.groupCntInterval)
     if (this.timer) clearInterval(this.timer)
-    EventBus.$off("sidebar-aside", this.handleResize)
-    EventBus.$off("change-theme", this.updateChartTheme)
+    if (this.resizeHandler) {
+      window.removeEventListener("resize", this.resizeHandler)
+      this.resizeHandler.cancel()
+    }
+    if (this.sidebarResizeHandler) {
+      EventBus.$off("sidebar-aside", this.sidebarResizeHandler)
+      this.sidebarResizeHandler.cancel()
+    }
+    if (this.themeChangeHandler) {
+      EventBus.$off("change-theme", this.themeChangeHandler)
+      this.themeChangeHandler.cancel()
+    }
+    this.groupChart?.dispose()
+    this.hotPluginChart?.dispose()
+    this.groupChart = null
+    this.hotPluginChart = null
   },
   methods: {
     async initCharts() {
       const echarts = await this.$loadEcharts()
+      if (
+        this.destroyed ||
+        !this.$refs.groupChart ||
+        !this.$refs.hotPluginChart
+      ) return
       this.groupChart = echarts.init(this.$refs.groupChart)
       this.hotPluginChart = echarts.init(this.$refs.hotPluginChart)
       this.getActiveGroupData()
       this.getHotPlugin()
     },
     updateChartTheme() {
+      if (this.destroyed || !this.groupChart || !this.hotPluginChart) return
       const groupOption = getChartOption()
       groupOption.series[0].data = this.activeGroupData
       const pluginOption = getChartOption()
@@ -257,8 +272,10 @@ export default {
     },
 
     handleResize() {
+      if (this.destroyed) return
       this.$nextTick(() => {
-        if (this.$refs.rightInfo) {
+        if (this.destroyed) return
+        if (this.$refs.rightInfo && this.$refs.groupType) {
           const infoHeight =
             this.$refs.rightInfo.querySelector(".base-info").offsetHeight
           this.chartAreaHeight =
@@ -270,24 +287,23 @@ export default {
           this.chartHeight =
             this.chartAreaHeight / 2 - this.$refs.groupType.offsetHeight - 20
           this.$nextTick(() => {
-            this.groupChart.resize()
-            this.hotPluginChart.resize()
+            if (this.destroyed) return
+            this.groupChart?.resize()
+            this.hotPluginChart?.resize()
           })
         }
       })
     },
 
     setupResizeListener() {
-      const resizeHandler = debounce(() => {
+      this.resizeHandler = debounce(() => {
         this.$nextTick(() => {
+          if (this.destroyed) return
           this.groupChart?.resize()
           this.hotPluginChart?.resize()
         })
       }, 200)
-      window.addEventListener("resize", resizeHandler)
-      this.$once("hook:beforeDestroy", () => {
-        window.removeEventListener("resize", resizeHandler)
-      })
+      window.addEventListener("resize", this.resizeHandler)
     },
 
     startTimers() {
@@ -329,6 +345,7 @@ export default {
     },
 
     getActiveGroupData(date_type, no_loading) {
+      if (!this.botInfo.self_id || this.destroyed) return
       if (date_type == "all") {
         date_type = null
       }
@@ -340,15 +357,16 @@ export default {
         date_type: date_type,
         bot_id: this.botInfo.self_id,
       }).then((resp) => {
+        if (this.destroyed) {
+          loading?.close()
+          return
+        }
         if (resp.suc) {
           if (resp.warning) {
             if (loading) {
               this.$message.warning(resp.info)
             }
           } else {
-            if (loading) {
-              this.$message.success(resp.info)
-            }
             const tmpOpt = getChartOption()
             const group_list = []
             const data = resp.data.map((e) => {
@@ -364,7 +382,7 @@ export default {
             tmpOpt.series[0].data = data
             tmpOpt.series[0].series = "#a855f7"
 
-            this.groupChart.setOption(tmpOpt, true)
+            this.groupChart?.setOption(tmpOpt, true)
           }
         } else {
           if (loading) {
@@ -383,16 +401,20 @@ export default {
     },
 
     getHotPlugin(date_type) {
+      if (!this.botInfo.self_id || this.destroyed) return
       const loading = this.getLoading(".hot-plugin")
       this.getRequest(`${this.$root.prefix}/main/get_hot_plugin`, {
         date_type: date_type,
         bot_id: this.botInfo.self_id,
       }).then((resp) => {
+        if (this.destroyed) {
+          loading.close()
+          return
+        }
         if (resp.suc) {
           if (resp.warning) {
             this.$message.warning(resp.info)
           } else {
-            this.$message.success(resp.info)
             const tmpOpt = getChartOption()
             const hotPluginList = []
             const data = resp.data.map((e) => {
@@ -406,7 +428,7 @@ export default {
             tmpOpt.xAxis.data = hotPluginList
             this.hotPluginData = data
             tmpOpt.series[0].data = data
-            this.hotPluginChart.setOption(tmpOpt, true)
+            this.hotPluginChart?.setOption(tmpOpt, true)
           }
         } else {
           this.$message.error(resp.info)
@@ -422,6 +444,14 @@ export default {
 .right-info {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb-color) var(--bg-color);
+}
+
+.command-surface {
+  border-radius: 8px;
+}
+
+.time-filter {
+  border-radius: 4px;
 }
 
 .right-info::-webkit-scrollbar {

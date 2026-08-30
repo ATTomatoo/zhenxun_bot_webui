@@ -1,9 +1,8 @@
 <template>
   <div
-    class="detail-info rounded-2xl shadow-lg p-6 h-full overflow-y-auto"
+    class="detail-info p-5 h-full overflow-y-auto"
     :style="{
       background: 'var(--el-bg-color)',
-      boxShadow: 'var(--el-box-shadow-light)',
     }"
   >
     <!-- 空状态 -->
@@ -30,7 +29,7 @@
       <div class="flex flex-col items-center mb-6">
         <el-avatar
           :src="data.ava_url"
-          class="shadow-lg mb-4 transform hover:scale-105 transition-transform"
+          class="mb-4"
           :style="{
             height: sizeMana.avaSize + 'px',
             width: sizeMana.avaSize + 'px',
@@ -46,7 +45,7 @@
         </h2>
 
         <div
-          class="px-4 py-2 rounded-full text-sm shadow-md"
+          class="identity-badge px-4 py-2 text-sm"
           :style="{
             background: 'var(--el-color-primary)',
             color: 'var(--el-color-white)',
@@ -58,10 +57,10 @@
 
       <!-- 基本信息区域 -->
       <div
-        class="rounded-xl p-4 mb-6 transform hover:shadow-lg transition-shadow"
+        class="detail-section p-4 mb-4"
         :style="{
           background: 'var(--el-bg-color-overlay)',
-          boxShadow: 'var(--el-box-shadow-light)',
+          border: '1px solid var(--el-border-color-light)',
         }"
       >
         <template v-if="detailType == 'private'">
@@ -240,10 +239,10 @@
 
       <!-- 最喜爱的插件图表 -->
       <div
-        class="rounded-xl p-4 transform hover:shadow-lg transition-shadow"
+        class="detail-section p-4"
         :style="{
           background: 'var(--el-bg-color-overlay)',
-          boxShadow: 'var(--el-box-shadow-light)',
+          border: '1px solid var(--el-border-color-light)',
         }"
       >
         <h3
@@ -280,10 +279,11 @@ export default {
       allPluginList: [],
       tmpAllPluginList: [],
       likePluginChart: null,
+      destroyed: false,
     }
   },
   created() {
-    this.botId = this.$store.state.botInfo.self_id
+    this.botId = this.$store.state.botInfo?.self_id || null
   },
   mounted() {
     window.addEventListener("resize", this.handleResize)
@@ -294,12 +294,11 @@ export default {
       this.sizeMana.avaSize = 100
     },
     getAllPluginList() {
-      this.getRequest(`${this.$root.prefix}/plugin/get_plugin_list`, {
+      return this.getRequest(`${this.$root.prefix}/plugin/get_plugin_list`, {
         plugin_type: ["NORMAL", "ADMIN"],
       }).then((resp) => {
         if (resp.suc) {
           this.allPluginList = resp.data
-          this.$message.success(resp.info)
         } else {
           this.$message.error(resp.info)
         }
@@ -327,6 +326,7 @@ export default {
         .finally(() => loading.close())
     },
     getFriend(user_id) {
+      if (!this.botId) return
       const loading = this.getLoading(".detail-info")
 
       this.getRequest(`${this.$root.prefix}/manage/get_friend_detail`, {
@@ -342,6 +342,7 @@ export default {
       })
     },
     async getGroup(group_id) {
+      if (!this.botId) return
       if (!this.allPluginList.length) {
         await this.getAllPluginList()
       }
@@ -390,7 +391,9 @@ export default {
     },
     async initChart(likePluginObj) {
       const echarts = await this.$loadEcharts()
+      if (this.destroyed) return
       this.$nextTick(() => {
+        if (this.destroyed || !this.$refs.likePluginChart) return
         if (!this.likePluginChart) {
           this.likePluginChart = echarts.init(this.$refs.likePluginChart)
         }
@@ -415,16 +418,23 @@ export default {
     },
   },
   beforeDestroy() {
+    this.destroyed = true
     window.removeEventListener("resize", this.handleResize)
     window.removeEventListener("resize", this.resizeChart)
     if (this.likePluginChart) {
       this.likePluginChart.dispose()
+      this.likePluginChart = null
     }
   },
 }
 </script>
 
 <style scoped>
+.identity-badge,
+.detail-section {
+  border-radius: 8px;
+}
+
 /* 美化滚动条 */
 .detail-info::-webkit-scrollbar {
   width: 6px;
