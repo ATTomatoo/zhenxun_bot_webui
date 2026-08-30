@@ -1,672 +1,715 @@
 <template>
-  <div class="base">
-    <div v-if="redirecting" class="redirect-mask">
-      <i class="el-icon-loading redirect-icon"></i>
-      <div class="redirect-title">真寻正在重启</div>
-      <div>正在等待新地址 {{ redirectBaseUrl }}，连接成功后会自动跳转…</div>
-    </div>
-
-    <div class="setting-title">基础配置</div>
-    <el-form
-      ref="ruleForm"
-      :model="setting"
-      label-width="110px"
-      class="form-content"
-      :rules="rules"
-    >
-      <el-form-item label="超级用户ID" prop="superusers">
-        <InteractiveInput
-          v-model="setting.superusers"
-          placeholder="请输入超级用户ID，多个请使用逗号隔开"
-        ></InteractiveInput>
-      </el-form-item>
-
-      <el-form-item label="数据库地址" prop="db_url">
-        <div class="connection-field">
-          <InteractiveInput
-            v-model.trim="setting.db_url"
-            placeholder="数据库地址"
-            @blur="testDatabase"
-          ></InteractiveInput>
-          <el-button
-            class="test-button"
-            type="primary"
-            plain
-            :loading="dbTestStatus === 'testing'"
-            :disabled="isSqlite || dbTestStatus === 'testing'"
-            @click="testDatabase"
-          >
-            <i
-              v-if="dbTestStatus !== 'testing'"
-              :class="connectionIcon(dbTestStatus)"
-            ></i>
-            {{ isSqlite ? "无需测试" : "测试连接" }}
-          </el-button>
+  <main class="setup-shell">
+    <section class="setup-workspace" v-loading="initializing">
+      <header class="setup-header">
+        <div class="brand-block">
+          <img src="@/assets/image/logo.png" alt="真寻" class="brand-logo" />
+          <div>
+            <p class="brand-kicker">ZHENXUN BOT</p>
+            <h1>首次配置</h1>
+            <p>完成本体运行所需的基础设置</p>
+          </div>
         </div>
-        <div :class="['connection-status', dbTestStatus]">
-          {{ databaseStatusText }}
-        </div>
-      </el-form-item>
+        <span class="state-badge">{{ stateLabel }}</span>
+      </header>
 
-      <el-form-item label="登录用户名" prop="username">
-        <InteractiveInput
-          v-model="setting.username"
-          placeholder="前端登录用户名"
-        ></InteractiveInput>
-      </el-form-item>
-      <el-form-item label="登录密码" prop="password">
-        <InteractiveInput
-          v-model="setting.password"
-          type="password"
-          placeholder="前端登录密码"
-        ></InteractiveInput>
-      </el-form-item>
-
-      <el-row :gutter="16">
-        <el-col :xs="24" :sm="14">
-          <el-form-item label="运行/连接地址" prop="host">
-            <InteractiveInput
-              v-model.trim="setting.host"
-              placeholder="例如 127.0.0.1"
-            ></InteractiveInput>
-          </el-form-item>
-        </el-col>
-        <el-col :xs="24" :sm="10">
-          <el-form-item label="运行端口" prop="port">
-            <InteractiveInput
-              v-model="setting.port"
-              placeholder="运行端口"
-            ></InteractiveInput>
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <div class="address-tip">
-        这里同时设置 Bot 重启后的监听地址和 WebUI 连接地址；立即重启后会自动跳转。
+      <div v-if="!claimed && serverState === 'restart_pending'" class="pending-layout">
+        <i class="el-icon-refresh pending-icon" />
+        <span class="section-number">配置已保存</span>
+        <h2>真寻正在等待重启</h2>
+        <p>当前浏览器没有可用的重启票据。可手动重启进程，然后重新检查服务状态。</p>
+        <el-button type="primary" @click="loadStatus">重新检查</el-button>
       </div>
 
-      <el-collapse v-model="activePanels" class="more-config">
-        <el-collapse-item title="更多配置" name="more">
-          <div class="config-warning">
-            <i class="el-icon-warning-outline"></i>
-            不知道是什么就不要动
-          </div>
-          <el-form-item label="CACHE_MODE" prop="cache_mode">
-            <el-select v-model="setting.cache_mode" class="full-width">
-              <el-option label="内存缓存（MEMORY）" value="MEMORY"></el-option>
-              <el-option label="不使用缓存（NONE）" value="NONE"></el-option>
-              <el-option label="Redis 缓存（REDIS）" value="REDIS"></el-option>
-            </el-select>
+      <div v-else-if="!claimed" class="claim-layout">
+        <div class="claim-copy">
+          <span class="section-number">安全验证</span>
+          <h2>输入启动日志中的配置码</h2>
+          <p>
+            真寻启动时会在 INFO 日志中输出一次 8 位配置码，有效期 30
+            分钟。验证完成后，本浏览器可继续配置 15 分钟。
+          </p>
+        </div>
+        <el-form @submit.native.prevent class="claim-form">
+          <el-form-item label="一次性配置码">
+            <el-input
+              v-model.trim="claimCode"
+              maxlength="8"
+              autocomplete="one-time-code"
+              placeholder="例如 A1B2C3D4"
+              class="code-input"
+              @keyup.enter.native="claim"
+            />
           </el-form-item>
+          <p v-if="claimError" class="inline-result error">
+            <i class="el-icon-circle-close" /> {{ claimError }}
+          </p>
+          <el-button
+            type="primary"
+            :loading="claiming"
+            :disabled="claimCode.length !== 8"
+            class="primary-action"
+            @click="claim"
+          >
+            验证并开始
+          </el-button>
+        </el-form>
+      </div>
 
-          <template v-if="setting.cache_mode === 'REDIS'">
-            <el-form-item label="Redis 地址" prop="redis_host">
-              <div class="connection-field">
-                <InteractiveInput
-                  v-model.trim="setting.redis_host"
-                  placeholder="例如 127.0.0.1"
-                  @blur="testRedis"
-                ></InteractiveInput>
-                <el-button
-                  class="test-button"
-                  type="primary"
-                  plain
-                  :loading="redisTestStatus === 'testing'"
-                  :disabled="redisTestStatus === 'testing'"
-                  @click="testRedis"
-                >
-                  <i
-                    v-if="redisTestStatus !== 'testing'"
-                    :class="connectionIcon(redisTestStatus)"
-                  ></i>
-                  测试连接
-                </el-button>
-              </div>
-              <div :class="['connection-status', redisTestStatus]">
-                {{ redisStatusText }}
-              </div>
-            </el-form-item>
-            <el-row :gutter="16">
-              <el-col :xs="24" :sm="10">
-                <el-form-item label="Redis 端口" prop="redis_port">
-                  <InteractiveInput
-                    v-model="setting.redis_port"
-                    placeholder="6379"
-                    @blur="testRedis"
-                  ></InteractiveInput>
+      <template v-else>
+        <el-steps :active="step" finish-status="success" class="desktop-steps">
+          <el-step title="管理员" />
+          <el-step title="数据服务" />
+          <el-step title="监听地址" />
+          <el-step title="检查并启动" />
+        </el-steps>
+        <div class="mobile-progress">
+          <span>步骤 {{ step + 1 }} / 4</span>
+          <strong>{{ stepTitles[step] }}</strong>
+          <el-progress :percentage="(step + 1) * 25" :show-text="false" />
+        </div>
+
+        <div class="step-body">
+          <section v-show="step === 0" class="step-section">
+            <div class="step-intro">
+              <span class="section-number">01</span>
+              <h2>管理员账户</h2>
+              <p>该账户仅用于登录当前 WebUI。</p>
+            </div>
+            <el-form ref="accountForm" :model="account" label-position="top">
+              <div class="field-grid two-columns">
+                <el-form-item label="用户名" required>
+                  <el-input
+                    v-model.trim="account.username"
+                    maxlength="128"
+                    autocomplete="username"
+                  />
                 </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="14">
-                <el-form-item label="Redis 密码" prop="redis_password">
-                  <InteractiveInput
-                    v-model="setting.redis_password"
+                <el-form-item label="超级用户 ID">
+                  <el-input
+                    v-model="account.superusers"
+                    placeholder="多个 ID 使用逗号或换行分隔"
+                  />
+                </el-form-item>
+                <el-form-item label="管理密码" required>
+                  <el-input
+                    v-model="account.password"
                     type="password"
-                    placeholder="没有密码可留空"
-                    @blur="testRedis"
-                  ></InteractiveInput>
+                    show-password
+                    autocomplete="new-password"
+                  />
                 </el-form-item>
-              </el-col>
-            </el-row>
-          </template>
-        </el-collapse-item>
-      </el-collapse>
+                <el-form-item label="确认密码" required>
+                  <el-input
+                    v-model="account.confirmPassword"
+                    type="password"
+                    show-password
+                    autocomplete="new-password"
+                  />
+                </el-form-item>
+              </div>
+              <ul class="password-rules">
+                <li v-for="rule in passwordRules" :key="rule.label" :class="{ met: rule.met }">
+                  <i :class="rule.met ? 'el-icon-circle-check' : 'el-icon-remove-outline'" />
+                  {{ rule.label }}
+                </li>
+              </ul>
+            </el-form>
+          </section>
 
-      <el-form-item class="action-row">
-        <el-button
-          type="primary"
-          class="submit-btn"
-          :loading="submitting"
-          :disabled="!connectionsReady || submitting"
-          @click="submitForm('ruleForm')"
-        >
-          提交
-        </el-button>
-      </el-form-item>
-    </el-form>
+          <section v-show="step === 1" class="step-section">
+            <div class="step-intro">
+              <span class="section-number">02</span>
+              <h2>数据库与缓存</h2>
+              <p>SQLite 和内存缓存适合大多数单机部署。</p>
+            </div>
 
-    <CuteConfirm
-      :visible.sync="isComplete"
-      title="配置已保存"
-      :message="completeText"
-      @confirm="handleConfirm"
-      @cancel="handleCancel"
-      class="dialog"
-    />
-  </div>
+            <label class="field-label">数据库类型</label>
+            <div class="choice-grid database-choices">
+              <button
+                v-for="option in databaseOptions"
+                :key="option.value"
+                type="button"
+                class="choice-item"
+                :class="{ active: database.mode === option.value }"
+                @click="selectDatabaseMode(option.value)"
+              >
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.description }}</span>
+                <em v-if="option.recommended">推荐</em>
+              </button>
+            </div>
+
+            <el-form label-position="top" class="service-form">
+              <el-form-item v-if="database.mode === 'sqlite'" label="数据库文件">
+                <el-input v-model.trim="database.path" />
+                <p class="field-hint">路径必须位于真寻项目目录内。</p>
+              </el-form-item>
+              <div v-else-if="database.mode !== 'url'" class="field-grid database-fields">
+                <el-form-item label="地址">
+                  <el-input v-model.trim="database.host" />
+                </el-form-item>
+                <el-form-item label="端口">
+                  <el-input-number v-model="database.port" :min="1" :max="65535" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="用户名">
+                  <el-input v-model="database.username" autocomplete="off" />
+                </el-form-item>
+                <el-form-item label="密码">
+                  <el-input v-model="database.password" type="password" show-password autocomplete="new-password" />
+                </el-form-item>
+                <el-form-item label="数据库名" class="database-name">
+                  <el-input v-model.trim="database.database" />
+                </el-form-item>
+              </div>
+              <el-form-item v-else label="高级连接 URL">
+                <el-input v-model="database.url" type="password" show-password autocomplete="off" />
+                <p class="field-hint">仅在已有完整 DSN 时使用，不会显示在检查结果中。</p>
+              </el-form-item>
+            </el-form>
+            <probe-result :result="results.database" />
+            <el-button
+              class="probe-button"
+              :loading="probing.database"
+              @click="probeDatabase"
+            >
+              <i class="el-icon-connection" /> 测试数据库
+            </el-button>
+
+            <div class="section-divider" />
+            <label class="field-label">缓存模式</label>
+            <el-radio-group v-model="cache.mode" class="segmented-control">
+              <el-radio-button label="MEMORY">内存缓存</el-radio-button>
+              <el-radio-button label="NONE">关闭缓存</el-radio-button>
+              <el-radio-button label="REDIS">Redis</el-radio-button>
+            </el-radio-group>
+            <div v-if="cache.mode === 'REDIS'" class="field-grid redis-fields">
+              <el-form label-position="top">
+                <el-form-item label="Redis 地址"><el-input v-model.trim="cache.host" /></el-form-item>
+              </el-form>
+              <el-form label-position="top">
+                <el-form-item label="端口"><el-input-number v-model="cache.port" :min="1" :max="65535" controls-position="right" /></el-form-item>
+              </el-form>
+              <el-form label-position="top">
+                <el-form-item label="密码"><el-input v-model="cache.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+              </el-form>
+            </div>
+            <probe-result :result="results.cache" />
+            <el-button
+              class="probe-button"
+              :loading="probing.cache"
+              @click="probeCache"
+            >
+              <i class="el-icon-connection" /> 测试缓存
+            </el-button>
+          </section>
+
+          <section v-show="step === 2" class="step-section">
+            <div class="step-intro">
+              <span class="section-number">03</span>
+              <h2>监听地址</h2>
+              <p>选择哪些设备可以访问 WebUI，不影响协议端配置。</p>
+            </div>
+            <div class="choice-grid network-choices">
+              <button
+                v-for="option in networkOptions"
+                :key="option.value"
+                type="button"
+                class="choice-item"
+                :class="{ active: network.mode === option.value }"
+                @click="network.mode = option.value"
+              >
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.description }}</span>
+                <em v-if="option.recommended">推荐</em>
+              </button>
+            </div>
+            <el-form label-position="top" class="network-form">
+              <div class="field-grid two-columns">
+                <el-form-item v-if="network.mode === 'custom'" label="自定义本机地址">
+                  <el-input v-model.trim="network.host" placeholder="192.168.1.10 或 ::1" />
+                </el-form-item>
+                <el-form-item label="端口">
+                  <el-input-number v-model="network.port" :min="1" :max="65535" controls-position="right" />
+                </el-form-item>
+              </div>
+            </el-form>
+            <div v-if="detectedAddresses.length" class="detected-addresses">
+              <span>检测到的局域网地址</span>
+              <code v-for="address in detectedAddresses" :key="address">{{ address }}</code>
+            </div>
+            <probe-result :result="results.network" />
+            <el-button
+              class="probe-button"
+              :loading="probing.network"
+              @click="probeNetwork"
+            >
+              <i class="el-icon-connection" /> 测试监听
+            </el-button>
+          </section>
+
+          <section v-show="step === 3" class="step-section review-section">
+            <div class="step-intro">
+              <span class="section-number">04</span>
+              <h2>检查并启动</h2>
+              <p>保存时后端会再次执行全部检查，不依赖浏览器中的结果。</p>
+            </div>
+            <div class="checklist">
+              <div v-for="item in reviewItems" :key="item.key" class="check-row">
+                <i :class="reviewIcon(item.status)" />
+                <div>
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ item.message }}</span>
+                </div>
+                <b :class="item.status">{{ reviewStatus(item.status) }}</b>
+              </div>
+            </div>
+            <el-checkbox v-if="hasWarnings" v-model="acceptWarnings" class="warning-confirm">
+              我已了解以上警告，仍要继续
+            </el-checkbox>
+            <p v-if="applyError" class="inline-result error">
+              <i class="el-icon-circle-close" /> {{ applyError }}
+            </p>
+          </section>
+        </div>
+
+        <footer class="setup-actions">
+          <el-button v-if="step > 0" @click="step -= 1">上一步</el-button>
+          <span />
+          <el-button v-if="step < 3" type="primary" @click="nextStep">下一步</el-button>
+          <button
+            v-else
+            type="primary"
+            class="final-action"
+            :disabled="!canApply"
+            @click="saveAndRestart"
+          >
+            <i v-if="applying" class="el-icon-loading" />
+            {{ applying ? "正在保存" : "保存并重启" }}
+          </button>
+        </footer>
+      </template>
+    </section>
+
+    <div v-if="restarting" class="restart-overlay">
+      <i class="el-icon-loading" />
+      <h2>正在重启真寻</h2>
+      <p>正在检查新地址，页面会在服务恢复后自动跳转。</p>
+      <div v-if="restartTimedOut" class="restart-addresses">
+        <a v-for="url in restartUrls" :key="url" :href="`${url}/#/`">{{ url }}</a>
+        <el-button @click="pollRestart">重新检查</el-button>
+      </div>
+    </div>
+  </main>
 </template>
 
 <script>
-import { setBaseApiUrl, setPort } from "@/utils/api"
-import CuteConfirm from "../ui/CuteConfirm.vue"
-import InteractiveInput from "../ui/NeonInput.vue"
+const SETUP_TOKEN_KEY = "zhenxunSetupToken"
+const RESTART_RECEIPT_KEY = "zhenxunSetupRestartReceipt"
+
+const ProbeResult = {
+  name: "ProbeResult",
+  props: { result: { type: Object, default: null } },
+  render(h) {
+    if (!this.result) return h("div", { class: "probe-result idle" }, "尚未测试")
+    return h(
+      "div",
+      { class: ["probe-result", this.result.status] },
+      [
+        h("i", {
+          class:
+            this.result.status === "error"
+              ? "el-icon-circle-close"
+              : this.result.status === "warning"
+              ? "el-icon-warning-outline"
+              : "el-icon-circle-check",
+        }),
+        h("span", this.result.message),
+        h("b", `${this.result.latency_ms} ms`),
+      ]
+    )
+  },
+}
 
 export default {
   name: "SettingForm",
-  components: { InteractiveInput, CuteConfirm },
+  components: { ProbeResult },
   data() {
-    const checkHost = (rule, value, callback) => {
-      if (!value) {
-        return callback(new Error("运行地址不能为空"))
-      }
-      const ipv4Pattern =
-        /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-      if (!ipv4Pattern.test(value)) {
-        return callback(new Error("IP 地址不合法"))
-      }
-      callback()
-    }
-    const checkPort = (rule, value, callback) => {
-      if (value === "" || value === null || value === undefined) {
-        return callback(new Error("端口不能为空"))
-      }
-      const num = Number(value)
-      if (Number.isInteger(num) && num >= 1 && num <= 65535) {
-        return callback()
-      }
-      callback(new Error("端口必须是 1 到 65535 之间的整数"))
-    }
-    const checkRedisHost = (rule, value, callback) => {
-      if (this.setting.cache_mode === "REDIS" && !value) {
-        return callback(new Error("Redis 地址不能为空"))
-      }
-      callback()
-    }
     return {
-      completeText:
-        "配置已经保存。点击确定会立即重启真寻，WebUI 将在新地址可用后自动跳转；点击取消可稍后手动重启。",
-      setting: {
-        superusers: "",
-        db_url: "sqlite:data/db/zhenxun.db",
-        username: "admin",
-        password: "",
+      initializing: true,
+      serverState: "unconfigured",
+      claimed: false,
+      claimCode: "",
+      claimError: "",
+      claiming: false,
+      step: 0,
+      stepTitles: ["管理员", "数据服务", "监听地址", "检查并启动"],
+      account: { username: "admin", password: "", confirmPassword: "", superusers: "" },
+      database: {
+        mode: "sqlite",
+        path: "data/db/zhenxun.db",
         host: "127.0.0.1",
-        port: 8080,
-        cache_mode: "MEMORY",
-        redis_host: "127.0.0.1",
-        redis_port: 6379,
-        redis_password: "",
+        port: 3306,
+        username: "",
+        password: "",
+        database: "zhenxun",
+        url: "",
       },
-      activePanels: [],
-      isComplete: false,
-      submitting: false,
-      redirecting: false,
-      redirectBaseUrl: "",
-      dbTestStatus: "skipped",
-      testedDbUrl: "sqlite:data/db/zhenxun.db",
-      dbTestError: "",
-      redisTestStatus: "idle",
-      testedRedisValue: "",
-      redisTestError: "",
-      rules: {
-        superusers: [
-          { required: true, message: "请输入超级用户ID", trigger: "blur" },
-        ],
-        db_url: [
-          { required: true, message: "数据库地址不能为空", trigger: "blur" },
-        ],
-        username: [
-          { required: true, message: "请输入前端登录用户名", trigger: "blur" },
-        ],
-        password: [
-          { required: true, message: "请输入前端登录密码", trigger: "blur" },
-        ],
-        host: [{ required: true, validator: checkHost, trigger: "blur" }],
-        port: [{ required: true, validator: checkPort, trigger: "blur" }],
-        redis_host: [{ validator: checkRedisHost, trigger: "blur" }],
-        redis_port: [{ validator: checkPort, trigger: "blur" }],
-      },
+      cache: { mode: "MEMORY", host: "127.0.0.1", port: 6379, password: "" },
+      network: { mode: "lan", host: "", port: 8080 },
+      detectedAddresses: [],
+      results: { database: null, cache: null, network: null },
+      probing: { database: false, cache: false, network: false },
+      acceptWarnings: false,
+      applying: false,
+      applyError: "",
+      restarting: false,
+      restartTimedOut: false,
+      restartUrls: [],
+      databaseOptions: [
+        { value: "sqlite", label: "SQLite", description: "无需独立服务，适合单机", recommended: true },
+        { value: "mysql", label: "MySQL", description: "连接已有 MySQL 服务" },
+        { value: "postgres", label: "PostgreSQL", description: "适合长期和高负载部署" },
+        { value: "url", label: "连接 URL", description: "高级自定义配置" },
+      ],
+      networkOptions: [
+        { value: "local", label: "仅本机", description: "只允许当前设备访问" },
+        { value: "lan", label: "局域网", description: "同一网络设备均可访问", recommended: true },
+        { value: "custom", label: "自定义", description: "绑定指定本机网卡地址" },
+      ],
     }
   },
   computed: {
-    isSqlite() {
-      return this.setting.db_url.trim().toLowerCase().startsWith("sqlite:")
+    setupToken() {
+      return window.sessionStorage.getItem(SETUP_TOKEN_KEY) || ""
     },
-    currentRedisValue() {
+    setupHeaders() {
+      return { headers: { "X-Setup-Token": this.setupToken } }
+    },
+    stateLabel() {
+      return {
+        unconfigured: "等待配置",
+        partial: "配置待修复",
+        restart_pending: "等待重启",
+        configured: "已配置",
+      }[this.serverState]
+    },
+    passwordRules() {
+      const password = this.account.password
       return [
-        this.setting.redis_host.trim(),
-        String(this.setting.redis_port),
-        this.setting.redis_password,
-      ].join("\n")
+        { label: "至少 8 位", met: password.length >= 8 },
+        { label: "包含大写字母", met: /[A-Z]/.test(password) },
+        { label: "包含小写字母", met: /[a-z]/.test(password) },
+        { label: "包含数字", met: /[0-9]/.test(password) },
+        { label: "两次输入一致", met: !!password && password === this.account.confirmPassword },
+      ]
     },
-    databaseStatusText() {
-      if (this.isSqlite) return "SQLite 为本地数据库，无需连接测试"
-      if (this.dbTestStatus === "testing") return "正在测试数据库连接…"
-      if (this.dbTestStatus === "success") return "数据库连接测试通过"
-      if (this.dbTestStatus === "error") {
-        return `数据库连接失败：${this.dbTestError}`
-      }
-      return "输入完成后离开输入框，或点击“测试连接”"
+    accountReady() {
+      return !!this.account.username && this.passwordRules.every((rule) => rule.met)
     },
-    redisStatusText() {
-      if (this.redisTestStatus === "testing") return "正在测试 Redis 连接…"
-      if (this.redisTestStatus === "success") return "Redis 连接测试通过"
-      if (this.redisTestStatus === "error") {
-        return `Redis 连接失败：${this.redisTestError}`
-      }
-      return "Redis 模式必须测试通过后才能提交"
+    reviewItems() {
+      return [
+        { key: "account", label: "管理员账户", status: this.accountReady ? "ok" : "error", message: this.accountReady ? "密码规则和确认均已通过" : "账户或密码规则尚未完成" },
+        { key: "database", label: "数据库", status: this.results.database ? this.results.database.status : "error", message: this.results.database ? this.results.database.message : "尚未执行真实连接测试" },
+        { key: "cache", label: "缓存", status: this.results.cache ? this.results.cache.status : "error", message: this.results.cache ? this.results.cache.message : "尚未执行缓存检查" },
+        { key: "network", label: "监听地址", status: this.results.network ? this.results.network.status : "error", message: this.results.network ? this.results.network.message : "尚未执行监听检查" },
+      ]
     },
-    connectionsReady() {
-      const dbReady =
-        this.isSqlite ||
-        (this.dbTestStatus === "success" &&
-          this.testedDbUrl === this.setting.db_url.trim())
-      const redisReady =
-        this.setting.cache_mode !== "REDIS" ||
-        (this.redisTestStatus === "success" &&
-          this.testedRedisValue === this.currentRedisValue)
-      return dbReady && redisReady
+    hasWarnings() {
+      return this.reviewItems.some((item) => item.status === "warning")
+    },
+    canApply() {
+      const noErrors = this.reviewItems.every((item) => item.status !== "error")
+      return noErrors && (!this.hasWarnings || this.acceptWarnings)
     },
   },
   watch: {
-    "setting.db_url"(value) {
-      const normalized = String(value || "").trim()
-      if (normalized.toLowerCase().startsWith("sqlite:")) {
-        this.dbTestStatus = "skipped"
-        this.testedDbUrl = normalized
-        this.dbTestError = ""
-      } else if (normalized !== this.testedDbUrl) {
-        this.dbTestStatus = "idle"
-        this.dbTestError = ""
-      }
-    },
-    "setting.cache_mode"(value) {
-      if (value === "REDIS") {
-        this.activePanels = ["more"]
-      }
-    },
-    currentRedisValue(value) {
-      if (value !== this.testedRedisValue) {
-        this.redisTestStatus = "idle"
-        this.redisTestError = ""
-      }
-    },
+    database: { deep: true, handler() { this.results.database = null } },
+    cache: { deep: true, handler() { this.results.cache = null } },
+    network: { deep: true, handler() { this.results.network = null } },
+  },
+  async mounted() {
+    await this.loadStatus()
   },
   methods: {
-    connectionIcon(status) {
-      if (status === "success" || status === "skipped") {
-        return "el-icon-circle-check"
-      }
-      if (status === "error") return "el-icon-circle-close"
-      return "el-icon-connection"
-    },
-    async testDatabase() {
-      const dbUrl = this.setting.db_url.trim()
-      if (!dbUrl) {
-        this.dbTestStatus = "error"
-        this.dbTestError = "数据库地址不能为空"
-        return false
-      }
-      if (dbUrl.toLowerCase().startsWith("sqlite:")) {
-        this.dbTestStatus = "skipped"
-        this.testedDbUrl = dbUrl
-        this.dbTestError = ""
-        return true
-      }
-      if (this.dbTestStatus === "testing") return false
-
-      this.dbTestStatus = "testing"
-      this.dbTestError = ""
+    async loadStatus() {
+      this.initializing = true
       try {
-        const resp = await this.postRequest(
-          `${this.$root.prefix}/configure/test_db`,
-          { db_url: dbUrl }
-        )
-        if (this.setting.db_url.trim() !== dbUrl) return false
-        if (resp && resp.suc) {
-          this.dbTestStatus = "success"
-          this.testedDbUrl = dbUrl
-          this.$message.success(resp.info || "数据库连接成功！")
-          return true
-        }
-        this.dbTestStatus = "error"
-        this.dbTestError = (resp && resp.info) || "服务器没有返回测试结果"
-      } catch (error) {
-        this.dbTestStatus = "error"
-        this.dbTestError = error.message || "未知错误"
-      }
-      return false
-    },
-    async testRedis() {
-      if (this.setting.cache_mode !== "REDIS") return true
-      const testedValue = this.currentRedisValue
-      if (!this.setting.redis_host.trim()) {
-        this.redisTestStatus = "error"
-        this.redisTestError = "Redis 地址不能为空"
-        return false
-      }
-      const port = Number(this.setting.redis_port)
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        this.redisTestStatus = "error"
-        this.redisTestError = "Redis 端口不合法"
-        return false
-      }
-      if (this.redisTestStatus === "testing") return false
-
-      this.redisTestStatus = "testing"
-      this.redisTestError = ""
-      try {
-        const resp = await this.postRequest(
-          `${this.$root.prefix}/configure/test_redis`,
-          {
-            redis_host: this.setting.redis_host.trim(),
-            redis_port: port,
-            redis_password: this.setting.redis_password,
-          }
-        )
-        if (this.currentRedisValue !== testedValue) return false
-        if (resp && resp.suc) {
-          this.redisTestStatus = "success"
-          this.testedRedisValue = testedValue
-          this.$message.success(resp.info || "Redis 连接成功！")
-          return true
-        }
-        this.redisTestStatus = "error"
-        this.redisTestError = (resp && resp.info) || "服务器没有返回测试结果"
-      } catch (error) {
-        this.redisTestStatus = "error"
-        this.redisTestError = error.message || "未知错误"
-      }
-      return false
-    },
-    submitForm(formName) {
-      this.$refs[formName].validate((valid) => {
-        if (!valid) return
-        if (!this.connectionsReady) {
-          this.$message.warning("请先完成数据库或 Redis 连接测试")
+        const response = await this.getRequest(`${this.$root.prefix}/configure/status`)
+        this.serverState = response.data.state
+        if (this.serverState === "configured") {
+          this.$router.replace("/")
           return
         }
-        this.saveConfiguration()
-      })
-    },
-    async saveConfiguration() {
-      this.submitting = true
-      const superusers = this.setting.superusers
-        .replace(/，/g, ",")
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)
-      try {
-        const resp = await this.postRequest(
-          `${this.$root.prefix}/configure/set_configure`,
-          {
-            ...this.setting,
-            port: Number(this.setting.port),
-            redis_port: Number(this.setting.redis_port),
-            superusers,
+        if (this.serverState === "restart_pending") {
+          const receipt = window.sessionStorage.getItem(RESTART_RECEIPT_KEY)
+          if (this.setupToken && receipt) {
+            this.claimed = true
+            this.step = 3
           }
-        )
-        if (resp && resp.suc) {
-          this.$message.success(resp.info)
-          this.isComplete = true
-        } else {
-          this.$message.error((resp && resp.info) || "配置保存失败")
-        }
-      } finally {
-        this.submitting = false
-      }
-    },
-    getConnectionTarget() {
-      let host = this.setting.host.trim()
-      if (host === "0.0.0.0") {
-        host = window.location.hostname || "127.0.0.1"
-      }
-      const protocol = window.location.protocol === "https:" ? "https" : "http"
-      return `${protocol}://${host}`
-    },
-    saveConnectionTarget() {
-      const baseUrl = this.getConnectionTarget()
-      setBaseApiUrl(baseUrl)
-      setPort(String(this.setting.port))
-      this.redirectBaseUrl = `${baseUrl}:${this.setting.port}`
-      return this.redirectBaseUrl
-    },
-    handleCancel() {
-      this.saveConnectionTarget()
-      this.$router.replace({
-        name: "Login",
-        params: { firstSetting: true },
-      })
-    },
-    async handleConfirm() {
-      const loading = this.getLoading(".dialog")
-      try {
-        const resp = await this.postRequest(
-          `${this.$root.prefix}/configure/restart`
-        )
-        if (!resp || !resp.suc) {
-          this.$message.error((resp && resp.info) || "重启请求失败")
           return
         }
-        this.isComplete = false
-        this.redirecting = true
-        this.saveConnectionTarget()
-        await this.waitForServerAndRedirect()
+        if (this.setupToken) {
+          this.claimed = true
+          await this.loadDraft()
+        }
       } finally {
-        loading.close()
+        this.initializing = false
       }
     },
-    async waitForServerAndRedirect() {
-      const pingUrl = `${this.redirectBaseUrl}${this.$root.prefix}/system/ping`
-      for (let attempt = 0; attempt < 60; attempt++) {
+    async claim() {
+      this.claiming = true
+      this.claimError = ""
+      try {
+        const response = await this.postRequest(`${this.$root.prefix}/configure/claim`, { code: this.claimCode.toUpperCase() })
+        window.sessionStorage.setItem(SETUP_TOKEN_KEY, response.data.token)
+        this.claimed = true
+        await this.loadDraft()
+      } catch (error) {
+        this.claimError = (error.response && error.response.data && error.response.data.detail) || "验证失败，请检查启动日志。"
+      } finally {
+        this.claiming = false
+      }
+    },
+    async loadDraft() {
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/configure/draft`, null, this.setupHeaders)
+        const draft = response.data
+        this.account.username = draft.username || "admin"
+        Object.assign(this.database, draft.database || {})
+        Object.assign(this.cache, draft.cache || {})
+        Object.assign(this.network, draft.network || {})
+        this.detectedAddresses = draft.detected_addresses || []
+      } catch (error) {
+        if (error.response && [401, 409].includes(error.response.status)) {
+          window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
+          this.claimed = false
+        }
+      }
+    },
+    nextStep() {
+      if (this.step === 0 && !this.accountReady) {
+        this.$message.warning("请先完成管理员账户和密码规则")
+        return
+      }
+      if (this.step === 1 && (!this.results.database || !this.results.cache)) {
+        this.$message.warning("请手动测试数据库和缓存")
+        return
+      }
+      if (this.step === 2 && !this.results.network) {
+        this.$message.warning("请先测试监听地址")
+        return
+      }
+      this.step += 1
+    },
+    selectDatabaseMode(mode) {
+      this.database.mode = mode
+      if (mode === "mysql") this.database.port = 3306
+      if (mode === "postgres") this.database.port = 5432
+    },
+    async runProbe(key, path, payload) {
+      this.probing[key] = true
+      try {
+        const response = await this.postRequest(`${this.$root.prefix}/configure/probe/${path}`, payload, this.setupHeaders)
+        this.results[key] = response.data
+        return response.data.status !== "error"
+      } finally {
+        this.probing[key] = false
+      }
+    },
+    probeDatabase() {
+      return this.runProbe("database", "database", { database: this.database })
+    },
+    probeCache() {
+      return this.runProbe("cache", "cache", { cache: this.cache })
+    },
+    probeNetwork() {
+      return this.runProbe("network", "network", { network: this.network })
+    },
+    normalizedSuperusers() {
+      return [...new Set(this.account.superusers.split(/[，,\n]/).map((value) => value.trim()).filter(Boolean))]
+    },
+    reviewIcon(status) {
+      if (status === "ok") return "el-icon-circle-check ok"
+      if (status === "warning") return "el-icon-warning-outline warning"
+      return "el-icon-circle-close error"
+    },
+    reviewStatus(status) {
+      return { ok: "正常", warning: "警告", error: "未通过" }[status]
+    },
+    async saveAndRestart() {
+      if (!this.canApply) return
+      this.applying = true
+      this.applyError = ""
+      try {
+        const response = await this.postRequest(
+          `${this.$root.prefix}/configure/apply`,
+          {
+            username: this.account.username,
+            password: this.account.password,
+            confirm_password: this.account.confirmPassword,
+            superusers: this.normalizedSuperusers(),
+            database: this.database,
+            cache: this.cache,
+            network: this.network,
+            accept_warnings: this.acceptWarnings,
+          },
+          this.setupHeaders
+        )
+        if (!response.suc) {
+          this.applyError = response.info || "最终检查未通过。"
+          if (response.data) {
+            Object.assign(this.results, response.data)
+          }
+          return
+        }
+        this.serverState = "restart_pending"
+        this.restartUrls = this.buildRestartUrls(response.data.access_urls || [])
+        window.sessionStorage.setItem(RESTART_RECEIPT_KEY, response.data.restart_receipt)
+        const restart = await this.postRequest(
+          `${this.$root.prefix}/configure/restart`,
+          { receipt: response.data.restart_receipt },
+          this.setupHeaders
+        )
+        if (!restart.suc) {
+          this.applyError = restart.info || "重启请求未被接受。"
+          return
+        }
+        this.restarting = true
+        await this.pollRestart()
+      } catch (error) {
+        this.applyError = (error.response && error.response.data && error.response.data.detail) || "保存配置时发生错误。"
+      } finally {
+        this.applying = false
+      }
+    },
+    buildRestartUrls(urls) {
+      const protocol = window.location.protocol
+      const host = window.location.hostname.includes(":") ? `[${window.location.hostname}]` : window.location.hostname
+      const currentHostUrl = `${protocol}//${host}:${this.network.port}`
+      return [...new Set([currentHostUrl, ...urls])]
+    },
+    async pollRestart() {
+      this.restarting = true
+      this.restartTimedOut = false
+      for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1500))
-        try {
-          const response = await fetch(pingUrl, { cache: "no-store" })
-          if (response.ok) {
-            const data = await response.json()
-            if (data && data.suc) {
-              window.location.replace(`${this.redirectBaseUrl}/#/`)
-              return
+        for (const baseUrl of this.restartUrls) {
+          try {
+            const response = await fetch(`${baseUrl}${this.$root.prefix}/configure/status`, { cache: "no-store" })
+            if (response.ok) {
+              const payload = await response.json()
+              if (payload.data && payload.data.state === "configured") {
+                window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
+                window.sessionStorage.removeItem(RESTART_RECEIPT_KEY)
+                window.location.replace(`${baseUrl}/#/`)
+                return
+              }
             }
+          } catch (error) {
+            // A connection failure is expected while the worker restarts.
           }
-        } catch (error) {
-          // 重启期间连接失败是预期行为，继续等待。
         }
       }
-      this.redirecting = false
-      this.$message.error(
-        `新地址暂时无法连接，请确认真寻已重启后访问 ${this.redirectBaseUrl}`
-      )
+      this.restartTimedOut = true
     },
   },
 }
 </script>
 
 <style lang="scss" scoped>
-.base {
-  position: relative;
-  min-height: 100%;
-  width: 100%;
-  padding: 32px 20px;
-  box-sizing: border-box;
-  overflow-y: auto;
-  background-color: #fbe4e4;
-}
+.setup-shell { min-height: 100%; padding: 32px 20px; overflow-y: auto; background: linear-gradient(145deg, #f7f8fb 0%, #fff4f7 100%); color: #30333a; }
+.setup-workspace { width: min(960px, 100%); min-height: 680px; margin: 0 auto; background: #fff; border: 1px solid #e8e9ee; border-radius: 8px; box-shadow: 0 18px 54px rgba(61, 66, 84, 0.1); }
+.setup-header { display: flex; align-items: center; justify-content: space-between; padding: 24px 32px; border-bottom: 1px solid #eceef2; }
+.brand-block { display: flex; align-items: center; gap: 18px; }
+.brand-logo { width: 108px; height: 52px; object-fit: contain; }
+.brand-kicker { margin: 0 0 2px; color: #c74e80; font-size: 11px; font-weight: 800; }
+h1, h2, p { margin: 0; }
+h1 { font-family: "fzrzFont", sans-serif; font-size: 25px; letter-spacing: 0; }
+.brand-block p:last-child, .step-intro p, .claim-copy p { margin-top: 5px; color: #7b7f89; line-height: 1.7; }
+.state-badge { padding: 6px 10px; border: 1px solid #f0b1ca; border-radius: 4px; color: #b93d70; background: #fff4f8; font-size: 12px; }
+.claim-layout { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; min-height: 520px; padding: 64px 72px; }
+.pending-layout { display: flex; min-height: 520px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px; text-align: center; }
+.pending-layout p { max-width: 520px; margin-bottom: 8px; color: #7b7f89; line-height: 1.7; }
+.pending-icon { color: #c74e80; font-size: 38px; }
+.claim-copy h2, .step-intro h2 { margin-top: 8px; font-size: 23px; }
+.section-number { color: #c74e80; font-size: 12px; font-weight: 800; }
+.claim-form { padding-left: 36px; border-left: 1px solid #e6e8ed; }
+.code-input ::v-deep input { height: 52px; font-size: 22px; font-weight: 700; text-align: center; text-transform: uppercase; }
+.primary-action { width: 100%; height: 44px; margin-top: 12px; }
+.desktop-steps { padding: 26px 48px 10px; }
+.mobile-progress { display: none; }
+.step-body { min-height: 480px; padding: 28px 56px 18px; }
+.step-section { max-width: 780px; margin: 0 auto; }
+.step-intro { margin-bottom: 28px; }
+.field-grid { display: grid; gap: 0 18px; }
+.two-columns { grid-template-columns: 1fr 1fr; }
+.database-fields { grid-template-columns: 1.4fr 0.6fr; }
+.database-name { grid-column: 1 / -1; }
+.password-rules { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; color: #969aa4; font-size: 12px; }
+.password-rules li.met { color: #3b9d68; }
+.field-label { display: block; margin-bottom: 10px; font-weight: 700; }
+.choice-grid { display: grid; gap: 10px; margin-bottom: 22px; }
+.database-choices { grid-template-columns: repeat(4, 1fr); }
+.network-choices { grid-template-columns: repeat(3, 1fr); }
+.choice-item { position: relative; min-height: 82px; padding: 14px; border: 1px solid #dfe2e8; border-radius: 6px; color: #343740; background: #fff; text-align: left; cursor: pointer; }
+.choice-item:hover, .choice-item.active { border-color: #dc6d9b; background: #fff7fa; }
+.choice-item strong, .choice-item span { display: block; }
+.choice-item span { margin-top: 6px; color: #858995; font-size: 12px; line-height: 1.45; }
+.choice-item em { position: absolute; top: 8px; right: 8px; color: #c74e80; font-size: 10px; font-style: normal; }
+.field-hint { margin-top: 5px; color: #90949e; font-size: 12px; }
+.probe-button { width: 132px; margin-top: 8px; }
+.probe-result { display: flex; align-items: center; gap: 8px; min-height: 34px; margin-top: 4px; color: #8a8e98; font-size: 13px; }
+.probe-result b { margin-left: auto; font-size: 11px; }
+.probe-result.ok { color: #318c5a; }
+.probe-result.warning { color: #be7918; }
+.probe-result.error { color: #c74343; }
+.section-divider { height: 1px; margin: 26px 0 20px; background: #eceef2; }
+.segmented-control { margin-bottom: 18px; }
+.redis-fields { grid-template-columns: 1.2fr 0.7fr 1.2fr; }
+.detected-addresses { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; color: #747984; font-size: 12px; }
+.detected-addresses code { padding: 4px 7px; border-radius: 3px; background: #eef1f5; }
+.checklist { border-top: 1px solid #e8eaf0; }
+.check-row { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; min-height: 72px; border-bottom: 1px solid #e8eaf0; }
+.check-row > i { font-size: 20px; }
+.check-row div strong, .check-row div span { display: block; }
+.check-row div span { margin-top: 5px; color: #7d818b; font-size: 12px; }
+.check-row b { font-size: 12px; }
+.ok { color: #318c5a; }
+.warning { color: #be7918; }
+.error { color: #c74343; }
+.warning-confirm { margin-top: 20px; }
+.inline-result { margin: 10px 0; font-size: 13px; }
+.setup-actions { display: grid; grid-template-columns: 120px 1fr 150px; gap: 12px; padding: 18px 56px 24px; border-top: 1px solid #eceef2; }
+.setup-actions .el-button { min-height: 40px; }
+.final-action { min-height: 40px; border: 1px solid #cf588a; border-radius: 4px; color: #fff; background: #cf588a; cursor: pointer; }
+.final-action:disabled { border-color: #e5bdce; background: #e5bdce; cursor: not-allowed; }
+.restart-overlay { position: fixed; inset: 0; z-index: 4000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: rgba(250, 251, 253, 0.97); text-align: center; }
+.restart-overlay > i { color: #c74e80; font-size: 42px; }
+.restart-overlay p { color: #747984; }
+.restart-addresses { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.restart-addresses a { color: #b63d70; }
+::v-deep .el-button--primary { border-color: #cf588a; background: #cf588a; }
+::v-deep .el-input-number { width: 100%; }
 
-.setting-title {
-  font-family: "fzrzFont";
-  font-size: 46px;
-  margin: 0 auto 30px;
-  color: #ffadd2;
-  text-align: center;
-}
-
-.form-content {
-  width: min(760px, 100%);
-  margin: 0 auto;
-}
-
-::v-deep .el-form-item__label {
-  font-weight: bolder;
-}
-
-.connection-field {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.test-button {
-  flex: 0 0 112px;
-  height: 40px;
-}
-
-.connection-status {
-  min-height: 20px;
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 20px;
-  color: #909399;
-}
-
-.connection-status.success,
-.connection-status.skipped {
-  color: #67c23a;
-}
-
-.connection-status.testing {
-  color: #e6a23c;
-}
-
-.connection-status.error {
-  color: #f56c6c;
-}
-
-.address-tip {
-  margin: -8px 0 18px 110px;
-  color: #909399;
-  font-size: 12px;
-}
-
-.more-config {
-  margin: 4px 0 22px;
-  border-top: 1px solid rgba(245, 137, 185, 0.35);
-  border-bottom: 1px solid rgba(245, 137, 185, 0.35);
-}
-
-::v-deep .el-collapse-item__header,
-::v-deep .el-collapse-item__wrap {
-  background: transparent;
-}
-
-::v-deep .el-collapse-item__header {
-  padding-left: 12px;
-  color: #f06fa9;
-  font-weight: 700;
-}
-
-.config-warning {
-  margin: 0 0 18px 110px;
-  color: #e6a23c;
-  font-weight: 700;
-}
-
-.full-width {
-  width: 100%;
-}
-
-.action-row {
-  margin-bottom: 0;
-}
-
-.submit-btn {
-  width: 180px;
-  background-color: #f589b9;
-  border-color: #f589b9;
-  float: right;
-  color: #fff;
-}
-
-.submit-btn:hover,
-.submit-btn:focus {
-  background-color: #eb83b1;
-  border-color: #eb83b1;
-}
-
-.redirect-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px;
-  text-align: center;
-  color: #606266;
-  background: rgba(255, 245, 249, 0.96);
-}
-
-.redirect-icon {
-  font-size: 42px;
-  color: #f589b9;
-}
-
-.redirect-title {
-  color: #f06fa9;
-  font-size: 24px;
-  font-weight: 700;
-}
-
-@media (max-width: 640px) {
-  .base {
-    padding: 20px 12px;
-  }
-
-  .setting-title {
-    font-size: 36px;
-  }
-
-  .connection-field {
-    flex-direction: column;
-  }
-
-  .test-button {
-    width: 100%;
-  }
-
-  .address-tip,
-  .config-warning {
-    margin-left: 0;
-  }
+@media (max-width: 700px) {
+  .setup-shell { padding: 0; background: #fff; }
+  .setup-workspace { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .setup-header { padding: 18px 16px; }
+  .brand-logo { width: 82px; height: 42px; }
+  .brand-block p:last-child, .state-badge { display: none; }
+  .claim-layout { display: block; min-height: 0; padding: 48px 22px; }
+  .claim-form { margin-top: 34px; padding: 0; border: 0; }
+  .desktop-steps { display: none; }
+  .mobile-progress { display: block; padding: 18px 18px 4px; }
+  .mobile-progress span, .mobile-progress strong { display: block; margin-bottom: 7px; }
+  .mobile-progress span { color: #a24a70; font-size: 11px; }
+  .step-body { min-height: calc(100vh - 230px); padding: 24px 18px 16px; }
+  .two-columns, .database-fields, .redis-fields, .database-choices, .network-choices { grid-template-columns: 1fr; }
+  .database-name { grid-column: auto; }
+  .choice-item { min-height: 70px; }
+  .setup-actions { position: sticky; bottom: 0; grid-template-columns: 1fr 1fr; padding: 12px 18px; background: #fff; }
+  .setup-actions span { display: none; }
+  .setup-actions .el-button:last-child { grid-column: 2; }
 }
 </style>

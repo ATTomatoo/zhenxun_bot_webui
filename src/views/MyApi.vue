@@ -68,7 +68,7 @@
               textShadow: '2px 2px 4px var(--el-color-primary-light-9)',
             }"
           >
-            API 地址设置
+            高级 API 地址设置
           </h1>
           <div
             class="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-24 h-1 rounded-full"
