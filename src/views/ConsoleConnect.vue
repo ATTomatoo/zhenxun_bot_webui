@@ -78,8 +78,8 @@ export default {
             `${response.data.token_type} ${response.data.access_token}`
           )
           window.sessionStorage.setItem("isAuthenticated", true)
-          this.$message.success(response.info)
           await this.$router.replace("/home")
+          this.$message.success(response.info)
           return
         }
         this.fail("服务器返回了无法识别的连接状态。")

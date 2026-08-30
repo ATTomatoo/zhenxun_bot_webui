@@ -21,12 +21,14 @@ export default {
 .base {
   background-color: #f4f5fa;
   height: 100%;
+  min-height: 0;
   width: 100%;
   overflow: hidden;
 }
 
 .base-info {
   height: 100%;
+  min-height: 0;
   width: 100%;
 }
 </style>
