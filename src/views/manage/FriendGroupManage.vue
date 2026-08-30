@@ -14,7 +14,6 @@
       :style="{
         background: 'var(--el-bg-color-overlay)',
         borderBottom: '1px solid var(--el-border-color-light)',
-        backdropFilter: 'blur(8px)',
       }"
     >
       <!-- 标题 -->
@@ -23,9 +22,7 @@
           class="text-xl font-bold"
           :style="{ color: 'var(--el-color-primary)' }"
         >
-          <span class="inline-block transform rotate-3">🌸</span>
           好友与群组
-          <span class="inline-block transform -rotate-3">🌸</span>
         </h1>
       </div>
 
@@ -34,11 +31,11 @@
         <el-badge
           :value="requestCount"
           :hidden="requestCount <= 0"
-          class="transform hover:scale-105 transition-transform"
+          class="request-badge"
         >
           <button
             @click="openRequest"
-            class="flex items-center px-4 py-2 rounded-full transition-colors shadow-sm"
+            class="request-button flex items-center px-4 py-2 transition-colors"
             :style="{
               background: 'var(--el-color-primary-light-9)',
               color: 'var(--el-color-primary)',
@@ -55,10 +52,10 @@
     <div class="flex-1 flex flex-col md:flex-row p-2 gap-2 min-h-0">
       <!-- 左侧好友列表 -->
       <div
-        class="data-list-container w-full md:w-1/4 lg:w-1/5 rounded-xl transition-all duration-300 flex-shrink-0"
+        class="workspace-panel data-list-container w-full md:w-1/4 lg:w-1/5 transition-all duration-300 flex-shrink-0"
         :style="{
           background: 'var(--el-bg-color)',
-          boxShadow: 'var(--el-box-shadow-light)',
+          border: '1px solid var(--el-border-color-light)',
         }"
         :class="{
           'hidden md:block': !showList,
@@ -71,10 +68,10 @@
 
       <!-- 中间聊天窗口 -->
       <div
-        class="chat-container flex-1 rounded-xl flex-shrink-0"
+        class="workspace-panel chat-container flex-1 flex-shrink-0"
         :style="{
           background: 'var(--el-bg-color)',
-          boxShadow: 'var(--el-box-shadow-light)',
+          border: '1px solid var(--el-border-color-light)',
         }"
       >
         <ChatWindow ref="chatWindow" class="h-full" />
@@ -82,10 +79,10 @@
 
       <!-- 右侧详情信息 -->
       <div
-        class="detail-container w-full md:w-1/3 lg:w-1/4 rounded-xl transition-all duration-300 flex-shrink-0"
+        class="workspace-panel detail-container w-full md:w-1/3 lg:w-1/4 transition-all duration-300 flex-shrink-0"
         :style="{
           background: 'var(--el-bg-color)',
-          boxShadow: 'var(--el-box-shadow-light)',
+          border: '1px solid var(--el-border-color-light)',
         }"
         :class="{
           'hidden md:block': !showDetail,
@@ -103,7 +100,6 @@
       :style="{
         background: 'var(--el-bg-color-overlay)',
         borderTop: '1px solid var(--el-border-color-light)',
-        backdropFilter: 'blur(8px)',
       }"
     >
       <!-- 列表切换按钮 -->
@@ -193,8 +189,7 @@ export default {
   },
   mounted() {
     window.addEventListener("resize", this.handleResize)
-    this.fetchRequestCount()
-    this.getRequestCount()
+    if (this.$store.state.botInfo?.self_id) this.getRequestCount()
   },
   methods: {
     getRequestCount() {
@@ -204,7 +199,6 @@ export default {
             if (resp.warning) {
               this.$message.warning(resp.warning)
             } else {
-              this.$message.success(resp.info)
               this.requestCount = resp.data.friend_count + resp.data.group_count
             }
           } else {
@@ -232,22 +226,6 @@ export default {
     },
     handleResize() {
       this.windowHeight = window.innerHeight
-    },
-    fetchRequestCount() {
-      this.getRequest(`${this.$root.prefix}/manage/get_request_count`).then(
-        (resp) => {
-          if (resp.suc) {
-            if (resp.warning) {
-              this.$message.warning(resp.warning)
-            } else {
-              this.$message.success(resp.info)
-              this.requestCount = resp.data.friend_count + resp.data.group_count
-            }
-          } else {
-            this.$message.error(resp.info)
-          }
-        }
-      )
     },
     startChat(data) {
       this.$refs.chatWindow.startChat(data)
@@ -281,16 +259,12 @@ export default {
 <style scoped>
 .friend-manager-container {
   position: relative;
-  background-image: radial-gradient(
-      circle at 10% 20%,
-      var(--el-color-primary-light-8) 0%,
-      transparent 20%
-    ),
-    radial-gradient(
-      circle at 90% 80%,
-      var(--el-color-primary-light-7) 0%,
-      transparent 20%
-    );
+  background: var(--el-bg-color-page);
+}
+
+.workspace-panel,
+.request-button {
+  border-radius: 8px;
 }
 
 /* 滚动条美化 */

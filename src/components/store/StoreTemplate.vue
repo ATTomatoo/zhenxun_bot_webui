@@ -1,1048 +1,166 @@
 <template>
-  <div class="main p-4 md:p-6" :style="{ background: 'var(--el-bg-color)' }">
-    <!-- 标题部分 -->
-    <div class="title text-center mb-6">
-      <h1
-        class="text-3xl md:text-4xl font-bold animate-bounce"
-        :style="{ color: 'var(--el-color-primary)' }"
-      >
-        <span class="inline-block transform rotate-3">✨</span>
-        插件商店
-        <span class="inline-block transform -rotate-3">✨</span>
-      </h1>
-      <div class="mt-2" :style="{ color: 'var(--el-color-primary-light-3)' }">
-        发现更多有趣的功能吧~
+  <section class="store-shell">
+    <header class="store-header">
+      <div>
+        <h1>插件商店</h1>
+        <p>浏览、安装和维护真寻插件</p>
       </div>
+      <el-button icon="el-icon-refresh" :loading="loading" @click="loadPlugins">刷新</el-button>
+    </header>
+
+    <div class="store-toolbar">
+      <el-input v-model.trim="search" clearable prefix-icon="el-icon-search" placeholder="搜索名称、模块或作者" />
+      <el-select v-model="statusFilter" aria-label="安装状态">
+        <el-option label="全部状态" value="all" />
+        <el-option label="未安装" value="uninstalled" />
+        <el-option label="已安装" value="installed" />
+        <el-option label="可更新" value="updatable" />
+      </el-select>
+      <el-select v-model="typeFilter" aria-label="插件类型">
+        <el-option label="全部类型" value="all" />
+        <el-option v-for="type in pluginTypes" :key="type" :label="type" :value="type" />
+      </el-select>
+      <el-select v-model="sortBy" aria-label="排序方式">
+        <el-option label="默认排序" value="default" />
+        <el-option label="名称" value="name" />
+        <el-option label="作者" value="author" />
+        <el-option label="最近版本" value="version" />
+      </el-select>
     </div>
 
-    <!-- 筛选部分 -->
-    <div
-      class="filter mb-6 flex flex-col md:flex-row items-center justify-between gap-4"
-    >
-      <!-- 搜索框 -->
-      <div class="search-input w-full md:w-1/3 relative">
-        <el-input
-          v-model="search"
-          placeholder="搜索插件..."
-          class="rounded-full"
-        >
-          <template #prefix>
-            <svg-icon
-              icon-class="search"
-              :style="{ color: 'var(--el-color-primary-light-3)' }"
-            />
-          </template>
-        </el-input>
-      </div>
+    <div v-if="error" class="inline-state is-error">
+      <i class="el-icon-warning-outline"></i><span>{{ error }}</span>
+      <el-button type="text" @click="loadPlugins">重新加载</el-button>
+    </div>
 
-      <!-- 作者筛选 -->
-      <div class="search-tag">
-        <el-dropdown
-          @command="handleCommand"
-          trigger="click"
-          class="cursor-pointer"
-        >
-          <div
-            class="filter-button flex items-center px-4 py-2 rounded-full transition-all duration-300"
-            :style="{
-              backgroundColor: 'var(--el-fill-color-blank)',
-              border: '1px solid var(--el-border-color-darker)',
-              boxShadow: 'var(--el-box-shadow)',
-            }"
-          >
-            <svg-icon
-              :icon-class="authorIcon"
-              class="mr-2"
-              :color="'var(--el-color-primary)'"
-            />
-            <span
-              :style="{
-                color: 'var(--el-text-color-primary)',
-                fontWeight: 500,
-              }"
-              >作者筛选</span
-            >
-            <svg-icon
-              icon-class="arrow-down"
-              class="ml-2 transform transition-transform duration-300"
-              :color="'var(--el-color-primary)'"
-            />
+    <div v-loading="loading" class="store-content">
+      <div v-if="pagedPlugins.length" class="plugin-grid">
+        <article v-for="plugin in pagedPlugins" :key="plugin.id" class="plugin-card">
+          <div class="plugin-card__head">
+            <div class="plugin-title">
+              <el-tooltip :content="plugin.name" placement="top"><h2>{{ plugin.name }}</h2></el-tooltip>
+              <span>{{ plugin.module }}</span>
+            </div>
+            <el-tag v-if="plugin.update_available" size="mini" type="warning" effect="plain">可更新</el-tag>
+            <el-tag v-else-if="plugin.installed" size="mini" type="success" effect="plain">已安装</el-tag>
           </div>
-
-          <template #dropdown>
-            <el-dropdown-menu
-              class="author-dropdown"
-              :style="{
-                backgroundColor: 'var(--el-bg-color-overlay)',
-                border: '1px solid var(--el-border-color-darker)',
-                borderRadius: '8px',
-                boxShadow: 'var(--el-box-shadow)',
-                padding: '4px',
-              }"
-            >
-              <el-dropdown-item
-                v-for="(v, i) in authorList"
-                :key="i"
-                :command="v"
-                class="author-item"
-              >
-                <div
-                  class="flex items-center py-2 px-3 rounded-md"
-                  :style="{ color: 'var(--el-text-color-primary)' }"
-                >
-                  <svg-icon
-                    icon-class="user"
-                    class="mr-2"
-                    :color="'var(--el-color-primary)'"
-                  />
-                  {{ v }}
-                </div>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+          <p class="plugin-description">{{ plugin.description || "暂无简介" }}</p>
+          <dl class="plugin-meta">
+            <div><dt>作者</dt><dd>{{ plugin.author || "未知" }}</dd></div>
+            <div><dt>版本</dt><dd>v{{ plugin.version || "-" }}</dd></div>
+            <div><dt>类型</dt><dd>{{ plugin.plugin_type || "其他" }}</dd></div>
+            <div><dt>来源</dt><dd>{{ plugin.source === "official" ? "官方" : "社区" }}</dd></div>
+          </dl>
+          <footer class="plugin-actions">
+            <el-button type="text" @click="showDetails(plugin)">详情</el-button>
+            <el-tooltip content="打开插件仓库" placement="top">
+              <el-button v-if="repositoryUrl(plugin)" class="icon-action" icon="el-icon-link" circle @click="openRepository(plugin)" />
+            </el-tooltip>
+            <span class="action-spacer"></span>
+            <el-button v-if="!plugin.installed" type="primary" size="small" :loading="actionId === plugin.id" @click="runAction('install', plugin)">安装</el-button>
+            <el-button v-else-if="plugin.update_available" type="warning" size="small" :loading="actionId === plugin.id" @click="runAction('update', plugin)">更新</el-button>
+            <el-dropdown v-else trigger="click" @command="runAction($event, plugin)">
+              <el-button size="small">已安装<i class="el-icon-arrow-down el-icon--right" /></el-button>
+              <el-dropdown-menu slot="dropdown">
+                <el-dropdown-item command="update">检查更新</el-dropdown-item>
+                <el-dropdown-item command="remove" divided>卸载</el-dropdown-item>
+              </el-dropdown-menu>
+            </el-dropdown>
+          </footer>
+        </article>
+      </div>
+      <div v-else-if="!loading && !error" class="empty-state">
+        <i class="el-icon-box"></i><h2>没有符合条件的插件</h2><p>调整搜索词或筛选条件后重试</p>
       </div>
     </div>
 
-    <!-- 表格部分 -->
-    <div
-      class="table-container flex flex-col flex-1 min-h-0"
-      :style="{ height: getTableBorderHeight() + 'px' }"
-    >
-      <div
-        ref="tableWrapper"
-        class="table-border flex-1 flex flex-col"
-        :style="{
-          background: 'var(--el-bg-color)',
-          borderRadius: '12px',
-          padding: '1rem',
-          boxShadow: 'var(--el-box-shadow-light)',
-          border: '1px solid var(--el-border-color-light)',
-        }"
-      >
-        <el-table
-          :data="filterTableData"
-          stripe
-          :height="tableHeight"
-          border
-          style="width: 100%"
-          class="rounded-lg overflow-hidden flex-1"
-          :row-class-name="tableRowClassName"
-          :key="tableKey"
-        >
-          <el-table-column
-            prop="id"
-            label="ID"
-            width="70"
-            align="center"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >ID</span
-              >
-            </template>
-          </el-table-column>
+    <el-pagination v-if="filteredPlugins.length > pageSize" class="store-pagination" background layout="prev, pager, next" :current-page.sync="page" :page-size="pageSize" :total="filteredPlugins.length" />
 
-          <el-table-column
-            prop="name"
-            label="名称"
-            width="200px"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >名称</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <div class="name-border flex items-center">
-                <el-tooltip
-                  :content="scope.row.name"
-                  placement="top"
-                  effect="light"
-                >
-                  <span
-                    class="truncate max-w-[120px] md:max-w-[160px] ml-2 font-medium"
-                    :style="{ color: 'var(--el-text-color-primary)' }"
-                  >
-                    {{ scope.row.name }}
-                  </span>
-                </el-tooltip>
-
-                <a
-                  v-if="scope.row.github_url"
-                  :href="scope.row.github_url"
-                  target="_blank"
-                  class="ml-2 hover:scale-110 transform transition-transform"
-                >
-                  <svg-icon
-                    class="github-icon w-6 h-6"
-                    :style="{ color: 'var(--el-text-color-regular)' }"
-                    icon-class="github"
-                  />
-                </a>
-
-                <span
-                  v-if="installModule.includes(scope.row.module)"
-                  class="is-install ml-2 px-2 py-1 rounded-full flex items-center text-xs"
-                  :style="{
-                    background: 'var(--el-color-success-light-9)',
-                    color: 'var(--el-color-success)',
-                  }"
-                >
-                  <svg-icon icon-class="check" class="mr-1 w-3 h-3" />
-                  已安装
-                </span>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            prop="author"
-            label="作者"
-            width="180px"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >作者</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <div class="flex items-center">
-                <svg-icon
-                  icon-class="user"
-                  class="mr-2 w-4 h-4"
-                  :style="{ color: 'var(--el-color-primary-light-3)' }"
-                />
-                <span :style="{ color: 'var(--el-text-color-primary)' }">{{
-                  scope.row.author
-                }}</span>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            prop="version"
-            label="版本"
-            width="100px"
-            align="center"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >版本</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <el-tag
-                size="small"
-                effect="plain"
-                :style="{
-                  border: '1px solid var(--el-color-primary-light-5)',
-                  background: 'var(--el-color-primary-light-9)',
-                  color: 'var(--el-color-primary)',
-                }"
-              >
-                v{{ scope.row.version }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            prop="plugin_type"
-            label="类型"
-            width="120px"
-            align="center"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >类型</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <el-tag
-                :type="getPluginTypeColor(scope.row.plugin_type)"
-                size="small"
-                effect="dark"
-              >
-                {{ scope.row.plugin_type }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            prop="description"
-            label="简介"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >简介</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <el-tooltip
-                :content="scope.row.description"
-                placement="top"
-                effect="light"
-              >
-                <span
-                  class="line-clamp-2"
-                  :style="{ color: 'var(--el-text-color-secondary)' }"
-                >
-                  {{ scope.row.description }}
-                </span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            label="操作"
-            width="420px"
-            align="center"
-            header-align="center"
-          >
-            <template #header>
-              <span
-                :style="{
-                  color: 'var(--el-color-primary)',
-                  fontWeight: 'bold',
-                }"
-                >操作</span
-              >
-            </template>
-            <template slot-scope="scope">
-              <div class="flex flex-wrap justify-center gap-1 md:gap-2">
-                <my-button
-                  icon="readme"
-                  text="说明"
-                  :iconHeight="20"
-                  :height="28"
-                  :width="80"
-                  @click="handleReadme(scope.$index, scope.row)"
-                  type="info"
-                  :disabled="true"
-                  rounded="full"
-                  :style="{
-                    borderColor: 'var(--el-border-color)',
-                  }"
-                />
-                <my-button
-                  icon="download"
-                  text="安装"
-                  :iconHeight="20"
-                  :height="28"
-                  :width="80"
-                  @click="handleInstall(scope.$index, scope.row)"
-                  type="primary"
-                  :disabled="installModule.includes(scope.row.module)"
-                  rounded="full"
-                  :style="{
-                    borderColor: 'var(--el-border-color)',
-                  }"
-                />
-                <my-button
-                  icon="update"
-                  text="更新"
-                  :iconHeight="20"
-                  :height="28"
-                  :width="80"
-                  @click="handleUpdate(scope.$index, scope.row)"
-                  type="warning"
-                  :disabled="!installModule.includes(scope.row.module)"
-                  rounded="full"
-                  :style="{
-                    borderColor: 'var(--el-border-color)',
-                  }"
-                />
-                <my-button
-                  icon="remove"
-                  text="删除"
-                  :iconHeight="20"
-                  :height="28"
-                  :width="80"
-                  @click="handleRemove(scope.$index, scope.row)"
-                  type="danger"
-                  :disabled="!installModule.includes(scope.row.module)"
-                  rounded="full"
-                  :style="{
-                    borderColor: 'var(--el-border-color)',
-                  }"
-                />
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+    <el-drawer :visible.sync="drawerVisible" :title="selectedPlugin ? selectedPlugin.name : '插件详情'" :size="drawerSize" append-to-body>
+      <div v-if="selectedPlugin" class="detail-drawer">
+        <div class="detail-module">{{ selectedPlugin.module }}</div>
+        <h3>简介</h3><p>{{ selectedPlugin.description || "暂无简介" }}</p>
+        <h3>使用说明</h3><pre>{{ selectedPlugin.usage || "暂无使用说明" }}</pre>
+        <h3>仓库</h3>
+        <a v-if="repositoryUrl(selectedPlugin)" :href="repositoryUrl(selectedPlugin)" target="_blank" rel="noopener noreferrer">{{ repositoryUrl(selectedPlugin) }}</a>
+        <span v-else>未提供仓库地址</span>
       </div>
-    </div>
-  </div>
+    </el-drawer>
+  </section>
 </template>
 
 <script>
-import MyButton from "../ui/MyButton.vue"
 export default {
-  components: { MyButton },
   name: "StoreTemplate",
   data() {
-    return {
-      handleType: null,
-      authorIcon: "author-red",
-      authorList: [],
-      tableData: [],
-      search: "",
-      installModule: [],
-      tableHeight: null,
-      resizeObserver: null,
-      tableKey: 0, // 用于强制刷新表格
-    }
+    return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, drawerVisible: false, selectedPlugin: null }
   },
   computed: {
-    filterTableData() {
-      const search = this.search.trim()
-      if (search) {
-        return this.tableData.filter((v) => {
-          return v.author.includes(search) || v.name.includes(search)
-        })
-      } else {
-        return this.tableData
-      }
+    pluginTypes() { return [...new Set(this.plugins.map((item) => item.plugin_type).filter(Boolean))].sort() },
+    filteredPlugins() {
+      const keyword = this.search.toLowerCase()
+      const result = this.plugins.filter((plugin) => {
+        const matchesSearch = !keyword || `${plugin.name} ${plugin.module} ${plugin.author}`.toLowerCase().includes(keyword)
+        const matchesType = this.typeFilter === "all" || plugin.plugin_type === this.typeFilter
+        const matchesStatus = this.statusFilter === "all" || (this.statusFilter === "uninstalled" && !plugin.installed) || (this.statusFilter === "installed" && plugin.installed) || (this.statusFilter === "updatable" && plugin.update_available)
+        return matchesSearch && matchesType && matchesStatus
+      })
+      if (this.sortBy === "default") return result
+      return [...result].sort((left, right) => String(left[this.sortBy] || "").localeCompare(String(right[this.sortBy] || ""), "zh-CN"))
     },
+    pagedPlugins() { const start = (this.page - 1) * this.pageSize; return this.filteredPlugins.slice(start, start + this.pageSize) },
+    drawerSize() { return window.innerWidth <= 680 ? "92%" : "520px" },
   },
-  mounted() {
-    this.getPluginList()
-    this.calculateTableHeight()
-    this.setupResizeObserver()
-  },
-  beforeDestroy() {
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect()
-    }
-  },
+  watch: { search() { this.page = 1 }, statusFilter() { this.page = 1 }, typeFilter() { this.page = 1 }, sortBy() { this.page = 1 } },
+  mounted() { this.loadPlugins() },
   methods: {
-    getTableBorderHeight() {
-      if (this.$isMobile()) {
-        return this.tableHeight - 160
-      }
-      return this.tableHeight - 239
+    repositoryUrl(plugin) { return plugin.github_url || plugin.ali_url || "" },
+    openRepository(plugin) { window.open(this.repositoryUrl(plugin), "_blank", "noopener,noreferrer") },
+    showDetails(plugin) { this.selectedPlugin = plugin; this.drawerVisible = true },
+    async loadPlugins() {
+      this.loading = true; this.error = ""
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/store/get_plugin_store`)
+        if (!response.suc) throw new Error(response.info || "插件商店加载失败")
+        this.plugins = Array.isArray(response.data.plugin_list) ? response.data.plugin_list : []
+      } catch (error) {
+        this.plugins = []
+        this.error = error.response?.data?.detail || error.message || "插件商店暂时不可用。"
+      } finally { this.loading = false }
     },
-    calculateTableHeight() {
-      this.$nextTick(() => {
-        const headerHeight =
-          document.querySelector(".title")?.offsetHeight || 100
-        const filterHeight =
-          document.querySelector(".filter")?.offsetHeight || 80
-        const padding = 32 // 上下边距
-
-        // 计算可用高度
-        const windowHeight = window.innerHeight
-        const availableHeight =
-          windowHeight - headerHeight - filterHeight - padding
-
-        // 设置最小高度限制
-        const newHeight = Math.max(availableHeight, 300)
-
-        // 只有当高度确实变化时才更新
-        if (this.tableHeight !== newHeight) {
-          this.tableHeight = newHeight
-
-          this.tableKey += 1 // 强制表格重新渲染
-        }
-      })
-    },
-
-    setupResizeObserver() {
-      this.resizeObserver = new ResizeObserver(() => {
-        this.calculateTableHeight()
-      })
-
-      if (this.$refs.tableWrapper) {
-        this.resizeObserver.observe(this.$refs.tableWrapper)
-      }
-
-      window.addEventListener("resize", this.calculateTableHeight)
-    },
-    tableRowClassName({ row }) {
-      return this.installModule.includes(row.module) ? "installed-row" : ""
-    },
-
-    getPluginTypeColor(type) {
-      const typeMap = {
-        功能: "success",
-        娱乐: "warning",
-        工具: "",
-        管理: "danger",
-        其他: "info",
-      }
-      return typeMap[type] || ""
-    },
-
-    handleReadme(i, data) {
-      this.$message.info("README功能开发中，敬请期待~")
-    },
-
-    async handleUpdate(i, data) {
-      const result = await this.$cuteConfirm({
-        title: "更新确认",
-        message: `确定要更新这个插件吗`,
-        cancelButtonText: "我再想想",
-        confirmButtonText: "无视风险强制更新",
-        type: "warning",
-      })
-
-      if (result) {
-        var loading = this.getLoading(".table-border")
-
-        this.postRequest(`${this.$root.prefix}/store/update_plugin`, {
-          id: data.id,
-        })
-          .then((resp) => {
-            loading.close()
-            if (resp.suc) {
-              if (resp.warning) {
-                this.$message.warning({
-                  message: resp.warning,
-                  iconClass: "el-icon-warning-outline",
-                })
-              } else {
-                this.$message.success({
-                  message: resp.info || "插件更新成功!",
-                  iconClass: "el-icon-success",
-                })
-                this.getPluginList()
-              }
-            } else {
-              this.$message.error({
-                message: resp.info || "插件更新失败",
-                iconClass: "el-icon-error",
-              })
-            }
-          })
-          .catch((error) => {
-            loading.close()
-            this.$message.error({
-              message: "更新过程中发生错误: " + (error.message || error),
-              iconClass: "el-icon-error",
-            })
-            console.error("[Plugin Store] Update error:", error)
-          })
-      } else {
-        this.$message.info({
-          message: "已取消更新",
-          iconClass: "el-icon-info",
-        })
-      }
-    },
-
-    async handleRemove(i, data) {
-      const result = await this.$cuteConfirm({
-        title: "移除确认",
-        message: `确定要移除这个插件吗`,
-        cancelButtonText: "我再想想",
-        confirmButtonText: "坚定不移必须移除",
-        type: "warning",
-      })
-      if (result) {
-        var loading = this.getLoading(".table-border")
-
-        this.postRequest(`${this.$root.prefix}/store/remove_plugin`, {
-          id: data.id,
-        })
-          .then((resp) => {
-            loading.close()
-            if (resp.suc) {
-              if (resp.warning) {
-                this.$message.warning({
-                  message: resp.warning,
-                  iconClass: "el-icon-warning-outline",
-                })
-              } else {
-                this.$message.success({
-                  message: resp.info || "插件移除成功!",
-                  iconClass: "el-icon-success",
-                })
-                this.getPluginList()
-              }
-            } else {
-              this.$message.error({
-                message: resp.info || "插件移除失败",
-                iconClass: "el-icon-error",
-              })
-            }
-          })
-          .catch((error) => {
-            loading.close()
-            this.$message.error({
-              message: "移除过程中发生错误: " + (error.message || error),
-              iconClass: "el-icon-error",
-            })
-            console.error("[Plugin Store] Remove error:", error)
-          })
-      } else {
-        this.$message.info({
-          message: "已取消移除",
-          iconClass: "el-icon-info",
-        })
-      }
-    },
-
-    async handleInstall(i, data) {
-      const result = await this.$cuteConfirm({
-        title: "安装确认",
-        message: `确定要安装这个插件吗？`,
-        cancelButtonText: "我再想想",
-        confirmButtonText: "无视风险继续安装",
-      })
-      if (result) {
-        var loading = this.getLoading(".table-border")
-
-        this.postRequest(`${this.$root.prefix}/store/install_plugin`, {
-          id: data.id,
-        })
-          .then((resp) => {
-            loading.close()
-            if (resp.suc) {
-              if (resp.warning) {
-                this.$message.warning({
-                  message: resp.warning,
-                  iconClass: "el-icon-warning-outline",
-                })
-              } else {
-                this.$message.success({
-                  message: resp.info || "插件安装成功!",
-                  iconClass: "el-icon-success",
-                })
-                this.getPluginList()
-              }
-            } else {
-              this.$message.error({
-                message: resp.info || "插件安装失败",
-                iconClass: "el-icon-error",
-              })
-            }
-          })
-          .catch((error) => {
-            loading.close()
-            this.$message.error({
-              message: "安装过程中发生错误: " + (error.message || error),
-              iconClass: "el-icon-error",
-            })
-            console.error("[Plugin Store] Install error:", error)
-          })
-      } else {
-        this.$message.info({
-          message: "已取消安装",
-          iconClass: "el-icon-info",
-        })
-      }
-    },
-
-    handleCommand(s) {
-      this.search = s
-      this.$message.success(`已筛选作者: ${s}`)
-    },
-
-    getPluginList() {
-      var loading = this.getLoading(".table-border")
-      this.getRequest(`${this.$root.prefix}/store/get_plugin_store`)
-        .then((resp) => {
-          loading.close()
-          if (resp && resp.suc) {
-            if (resp.warning) {
-              this.$message.warning({
-                message: resp.warning,
-                iconClass: "el-icon-warning-outline",
-              })
-            } else {
-              this.$message.success({
-                message: resp.info || "获取插件商店列表成功!",
-                iconClass: "el-icon-success",
-              })
-              this.tableData = Array.isArray(resp.data.plugin_list)
-                ? resp.data.plugin_list
-                : []
-              this.installModule = resp.data.install_module || []
-              this.authorList = []
-
-              if (Array.isArray(resp.data.plugin_list)) {
-                for (let v of resp.data.plugin_list) {
-                  if (v && v.author && !this.authorList.includes(v.author)) {
-                    this.authorList.push(v.author)
-                  }
-                }
-              }
-            }
-          } else {
-            const errorMsg = resp
-              ? resp.info
-              : "无法获取插件商店列表，请检查网络连接或后端服务。"
-            this.$message.error({
-              message: errorMsg || "获取插件商店列表失败",
-              iconClass: "el-icon-error",
-            })
-            this.tableData = []
-            this.installModule = []
-            this.authorList = []
-          }
-        })
-        .catch((error) => {
-          loading.close()
-          this.$message.error({
-            message: `获取插件商店列表时出错: ${error.message || error}`,
-            iconClass: "el-icon-error",
-          })
-          console.error("[StoreTemplate Error] getPluginList catch:", error)
-          this.tableData = []
-          this.installModule = []
-          this.authorList = []
-        })
-    },
-
-    mouseover() {
-      this.authorIcon = "author-white"
-    },
-
-    mouseout() {
-      this.authorIcon = "author-red"
+    async runAction(action, plugin) {
+      const labels = { install: "安装", update: "更新", remove: "卸载" }
+      const confirmed = await this.$cuteConfirm({ title: `${labels[action]}插件`, message: `确认${labels[action]}“${plugin.name}”？`, confirmButtonText: "确认", cancelButtonText: "取消", type: action === "remove" ? "warning" : "info" })
+      if (!confirmed) return
+      this.actionId = plugin.id
+      try {
+        const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, { id: plugin.id })
+        if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
+        this.$message.success(response.info || `${labels[action]}完成`)
+        await this.loadPlugins()
+      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || `${labels[action]}失败`) }
+      finally { this.actionId = null }
     },
   },
 }
 </script>
 
-<style lang="scss" scoped>
-.main {
-  transition: background-color 0.3s ease;
-}
-
-.title {
-  h1 {
-    transition: color 0.3s ease;
-
-    span {
-      display: inline-block;
-      transition: transform 0.3s ease;
-    }
-  }
-}
-
-.filter-button {
-  transition: all 0.3s ease;
-
-  &:hover {
-    background: var(--el-fill-color-light);
-    border-color: var(--el-border-color);
-  }
-}
-
-.author-dropdown {
-  .author-item {
-    transition: all 0.3s ease;
-
-    &:hover {
-      background: var(--el-fill-color-light);
-      color: var(--el-color-primary);
-    }
-  }
-}
-
-.table-container {
-  .table-border {
-    transition: all 0.3s ease;
-  }
-
-  :deep(.el-table) {
-    --el-table-border-color: var(--el-border-color-lighter);
-    --el-table-header-bg-color: var(--el-fill-color-light);
-    --el-table-row-hover-bg-color: var(--el-fill-color);
-
-    th {
-      background: var(--el-fill-color-light);
-      color: var(--el-color-primary);
-      font-weight: bold;
-      border-bottom: 2px solid var(--el-border-color);
-    }
-
-    td {
-      color: var(--el-text-color-regular);
-    }
-  }
-
-  .name-border {
-    .github-icon {
-      transition: all 0.3s ease;
-
-      &:hover {
-        color: var(--el-color-primary) !important;
-      }
-    }
-  }
-
-  .is-install {
-    transition: all 0.3s ease;
-  }
-}
-
-// 暗色主题适配
-:root[data-theme="dark"] {
-  .main {
-    background: var(--el-bg-color-overlay);
-  }
-
-  .filter-button {
-    background: var(--el-bg-color);
-    border-color: var(--el-border-color-darker);
-
-    &:hover {
-      background: var(--el-fill-color-dark);
-    }
-  }
-
-  .table-container {
-    .table-border {
-      background: var(--el-bg-color);
-      border-color: var(--el-border-color-darker);
-    }
-
-    :deep(.el-table) {
-      --el-table-border-color: var(--el-border-color-darker);
-      --el-table-header-bg-color: var(--el-fill-color-dark);
-      --el-table-row-hover-bg-color: var(--el-fill-color-darker);
-
-      th {
-        background: var(--el-fill-color-dark);
-      }
-    }
-  }
-}
-
-.table-container {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.table-border {
-  transition: height 0.3s ease;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-
-  ::v-deep .el-table {
-    flex: 1;
-
-    .el-table__body-wrapper {
-      overflow-y: auto;
-    }
-  }
-}
-
-.main {
-  .title {
-    h1 {
-      text-shadow: 1px 1px 2px var(--el-color-primary-light-8);
-    }
-  }
-
-  .search-input {
-    ::v-deep .el-input__inner {
-      border-radius: 9999px;
-      border: 1px solid var(--el-border-color);
-      padding-left: 35px;
-      background-color: var(--el-bg-color-overlay);
-      transition: all 0.3s;
-
-      &:focus {
-        border-color: var(--el-color-primary);
-        box-shadow: 0 0 0 2px var(--el-color-primary-light-8);
-      }
-    }
-  }
-
-  .table-border {
-    ::v-deep .el-table {
-      --el-table-border-color: var(--el-border-color);
-      --el-table-header-bg-color: var(--el-fill-color-light);
-      --el-table-row-hover-bg-color: var(--el-fill-color);
-
-      th {
-        font-weight: bold;
-        color: var(--el-color-primary);
-        background: var(--el-fill-color-light);
-      }
-
-      td {
-        border-bottom: 1px solid var(--el-border-color-light);
-      }
-
-      .el-table__body tr.installed-row {
-        background-color: var(--el-color-success-light-9);
-
-        &:hover {
-          background-color: var(--el-color-success-light-8) !important;
-        }
-      }
-
-      .el-table__body tr.el-table__row--striped {
-        background-color: var(--el-fill-color-lighter);
-
-        &.installed-row {
-          background-color: var(--el-color-success-light-8);
-        }
-      }
-    }
-  }
-}
-
-// 二次元风格弹窗
-.confirm-box {
-  border-radius: 16px !important;
-  border: 2px solid var(--el-border-color-light) !important;
-  background-color: var(--el-bg-color) !important;
-
-  .el-message-box__header {
-    background-color: var(--el-fill-color-light);
-    border-radius: 14px 14px 0 0;
-    padding: 15px 20px;
-
-    .el-message-box__title {
-      color: var(--el-color-primary);
-      font-weight: bold;
-    }
-  }
-
-  .el-message-box__content {
-    padding: 20px;
-    color: var(--el-text-color-primary);
-  }
-
-  .el-message-box__btns {
-    padding: 15px 20px;
-
-    .el-button {
-      border-radius: 9999px;
-      padding: 10px 20px;
-      font-weight: bold;
-
-      &:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--el-box-shadow-light);
-      }
-    }
-  }
-}
-
-// 响应式调整
-@media (max-width: 768px) {
-  .main {
-    padding: 2px;
-
-    .title h1 {
-      font-size: 1.8rem;
-    }
-
-    .filter {
-      flex-direction: column;
-
-      .search-input {
-        width: 100%;
-      }
-    }
-
-    .table-border {
-      padding: 8px;
-
-      ::v-deep .el-table {
-        font-size: 0.85rem;
-
-        th,
-        td {
-          padding: 8px 4px;
-        }
-      }
-    }
-  }
-}
-
-// 动画效果
-@keyframes bounce {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-.animate-bounce {
-  animation: bounce 2s infinite;
-}
-
-.filter-button {
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--el-box-shadow);
-    border-color: var(--el-color-primary);
-    background-color: var(--el-fill-color-light) !important;
-  }
-
-  &:active {
-    transform: translateY(1px);
-    background-color: var(--el-fill-color-darker) !important;
-  }
-}
-
-.author-dropdown {
-  ::v-deep .el-dropdown-menu__item {
-    margin: 2px 0;
-    padding: 0;
-    border-radius: 6px;
-
-    &:hover,
-    &:focus {
-      background-color: var(--el-color-primary-light-9);
-      color: var(--el-color-primary);
-    }
-
-    &:active {
-      background-color: var(--el-color-primary-light-7);
-    }
-  }
-}
-
-.author-item {
-  transition: all 0.3s ease;
-
-  &:hover {
-    transform: translateX(4px);
-  }
-}
+<style scoped>
+.store-shell { min-height: 100%; padding: 22px; color: var(--text-color); background: var(--bg-color); }
+.store-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.store-header h1 { margin: 0; font-size: 24px; }.store-header p { margin: 5px 0 0; color: var(--text-color-secondary); }
+.store-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 150px 150px 150px; gap: 10px; margin-bottom: 16px; }
+.store-content { min-height: 260px; }.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plugin-card { display: flex; min-width: 0; min-height: 244px; flex-direction: column; padding: 16px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color-secondary); }
+.plugin-card__head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 10px; }.plugin-title { min-width: 0; }
+.plugin-title h2 { margin: 0; overflow: hidden; color: var(--text-color); font-size: 16px; line-height: 24px; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-title span, .detail-module { color: var(--text-color-secondary); font-family: Consolas, monospace; font-size: 12px; }
+.plugin-description { display: -webkit-box; min-height: 44px; margin: 14px 0; overflow: hidden; color: var(--text-color-secondary); line-height: 22px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.plugin-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0 0 14px; }.plugin-meta div { min-width: 0; }.plugin-meta dt { color: var(--text-color-secondary); font-size: 11px; }.plugin-meta dd { margin: 2px 0 0; overflow: hidden; color: var(--text-color); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-actions { display: flex; min-height: 34px; align-items: center; gap: 7px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-color); }.action-spacer { flex: 1; }.icon-action { width: 32px; height: 32px; padding: 0; }
+.inline-state, .empty-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 96px; color: var(--text-color-secondary); }.inline-state.is-error { margin-bottom: 14px; border: 1px solid var(--el-color-danger-light-7); border-radius: 6px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
+.empty-state { min-height: 300px; flex-direction: column; }.empty-state i { font-size: 34px; }.empty-state h2, .empty-state p { margin: 0; }.store-pagination { margin-top: 20px; text-align: center; }
+.detail-drawer { padding: 0 22px 24px; color: var(--text-color); }.detail-drawer h3 { margin: 22px 0 8px; font-size: 14px; }.detail-drawer p, .detail-drawer pre { margin: 0; color: var(--text-color-secondary); line-height: 1.7; white-space: pre-wrap; word-break: break-word; }.detail-drawer a { word-break: break-all; }
+@media (max-width: 1180px) { .plugin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.store-toolbar { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 680px) { .store-shell { padding: 14px; }.store-header { align-items: flex-start; }.store-toolbar, .plugin-grid { grid-template-columns: 1fr; }.plugin-card { min-height: 224px; } }
 </style>

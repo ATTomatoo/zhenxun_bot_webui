@@ -1,9 +1,8 @@
 <template>
   <div
-    class="chat-window rounded-2xl shadow-lg overflow-hidden h-full flex flex-col"
+    class="chat-window overflow-hidden h-full flex flex-col"
     :style="{
       background: 'var(--el-bg-color-page)',
-      boxShadow: 'var(--el-box-shadow-light)',
     }"
   >
     <!-- 空状态 -->
@@ -39,7 +38,7 @@
           <el-avatar
             :src="chatInfo.ava_url"
             :size="40"
-            class="flex-shrink-0 transform hover:scale-110 transition-transform"
+            class="flex-shrink-0"
             :style="{ border: '2px solid var(--el-border-color-light)' }"
           ></el-avatar>
           <h2
@@ -84,7 +83,7 @@
               :src="data.ava_url"
               :size="45"
               :class="{ 'mt-5': data.name }"
-              class="avatar flex-shrink-0 transform hover:scale-110 transition-transform"
+              class="avatar flex-shrink-0"
               :style="{ border: '2px solid var(--el-border-color-light)' }"
             />
 
@@ -137,7 +136,7 @@
               v-if="data.isSelf"
               :src="data.ava_url"
               :size="45"
-              class="avatar flex-shrink-0 transform hover:scale-110 transition-transform"
+              class="avatar flex-shrink-0"
               :style="{ border: '2px solid var(--el-border-color-light)' }"
             />
           </div>
@@ -215,7 +214,7 @@ export default {
     this.botInfo = this.$store.state.botInfo || {}
   },
   mounted() {
-    this.$store.dispatch("initChatSocket")
+    if (this.botInfo.self_id) this.$store.dispatch("initChatSocket")
     this.calculateChatHeight()
     this.debouncedResize = debounce(this.handleResize, 100)
     window.addEventListener("resize", this.debouncedResize)
@@ -257,7 +256,7 @@ export default {
       this.calculateChatHeight()
     },
     async sendMessage() {
-      if (!this.message.trim()) return
+      if (!this.message.trim() || !this.botInfo.self_id) return
 
       const loading = this.getLoading(".el-textarea")
 
@@ -377,11 +376,6 @@ export default {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.message-bubble:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--el-box-shadow-light);
-}
-
 /* 响应式调整 */
 @media (max-width: 768px) {
   .chat-window {
@@ -418,7 +412,7 @@ export default {
 /* 消息气泡 */
 .message-bubble {
   padding: 8px 16px;
-  border-radius: 16px;
+  border-radius: 8px;
   word-break: break-word;
   transition: all 0.2s;
   overflow-wrap: break-word;

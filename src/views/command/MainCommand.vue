@@ -1,27 +1,26 @@
 <template>
   <div
-    class="base"
+    class="command-page"
     :style="{
       height: computedHeight + 'px',
-      background:
-        'linear-gradient(to bottom right, var(--bg-color), var(--bg-color-hover))',
+      background: 'var(--bg-color)',
     }"
   >
     <el-row :gutter="1" class="h-full">
       <el-col :xs="24" :sm="24" :md="8" :lg="6" class="h-full">
-        <div class="base-info h-full pr-0 md:pr-0">
+        <div class="command-panel h-full pr-0 md:pr-0">
           <LeftInfo class="h-full" />
         </div>
       </el-col>
 
       <el-col :xs="24" :sm="24" :md="16" :lg="12" class="h-full">
-        <div class="main-info h-full px-0 md:px-0">
+        <div class="command-panel h-full px-0 md:px-0">
           <MidInfo class="h-full" />
         </div>
       </el-col>
 
       <el-col :xs="24" :sm="24" :md="24" :lg="6" class="h-full">
-        <div class="config-info h-full pl-0 md:pl-0">
+        <div class="command-panel h-full pl-0 md:pl-0">
           <RightInfo class="h-full" />
         </div>
       </el-col>
@@ -64,33 +63,16 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.base {
-  @apply transition-all duration-300;
+.command-page {
+  padding: 10px;
   overflow: auto;
 }
 
-.base-info {
-  @apply bg-opacity-70 backdrop-blur-sm rounded-lg shadow-cute;
+.command-panel {
   background-color: var(--bg-color-secondary);
   border: 1px solid var(--border-color-light);
-}
-
-.main-info {
-  @apply bg-opacity-70 backdrop-blur-sm rounded-lg shadow-cute;
-  background-color: var(--bg-color-secondary);
-  border: 1px solid var(--border-color-light);
-}
-
-.config-info {
-  @apply bg-opacity-70 backdrop-blur-sm rounded-lg shadow-cute;
-  background-color: var(--bg-color-secondary);
-  border: 1px solid var(--border-color-light);
-}
-
-/* 自定义二次元风格阴影 */
-.shadow-cute {
-  box-shadow: 0 4px 15px var(--el-box-shadow-light),
-    0 2px 5px var(--el-box-shadow-lighter);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* 响应式设计 */
@@ -103,9 +85,7 @@ export default {
     }
   }
 
-  .base-info,
-  .main-info,
-  .config-info {
+  .command-panel {
     @apply mb-2;
   }
 }
@@ -115,9 +95,7 @@ export default {
     @apply flex-col;
   }
 
-  .base-info,
-  .main-info,
-  .config-info {
+  .command-panel {
     @apply px-2;
   }
 }

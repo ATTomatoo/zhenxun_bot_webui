@@ -34,10 +34,9 @@
         popper-class="anime-popover"
       >
         <div
-          class="p-4 rounded-xl"
+          class="p-4 sql-popover"
           :style="{
             background: 'var(--el-bg-color)',
-            boxShadow: 'var(--el-box-shadow-light)',
             border: '1px solid var(--el-border-color-light)',
           }"
         >
@@ -91,12 +90,11 @@
     </div>
     <!-- 主内容区域 -->
     <div
-      class="cmd-main-box rounded-xl"
+      class="cmd-main-box"
       ref="cmdMainBox"
       :style="{
         background: 'var(--el-bg-color-overlay)',
-        boxShadow: 'var(--el-box-shadow-light)',
-        border: '1px solid var(--el-color-primary-light-7)',
+        border: '1px solid var(--el-border-color-light)',
         height: sizeMana.mainBoxHeight + 'px',
         padding: '1.5rem',
       }"
@@ -117,9 +115,9 @@
         </el-col>
         <el-col :span="24" :md="12" class="mt-4 md:mt-0">
           <div
-            class="history h-full flex flex-col rounded-xl p-4"
+            class="history h-full flex flex-col p-4"
             :style="{
-              border: '1px solid var(--el-color-primary-light-7)',
+              border: '1px solid var(--el-border-color-light)',
               background: 'var(--el-fill-color-light)',
             }"
           >
@@ -131,9 +129,6 @@
               }"
             >
               历史记录
-              <span :style="{ color: 'var(--el-color-primary-light-5)' }"
-                >(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧</span
-              >
             </p>
             <div
               class="history-box flex-grow overflow-y-auto"
@@ -174,15 +169,8 @@
       </el-row>
     </div>
 
-    <!-- 分割线 - 主题色 -->
-    <div class="my-4 relative">
-      <div
-        class="h-1 rounded-full"
-        :style="{
-          background:
-            'linear-gradient(90deg, var(--el-color-primary-light-7), var(--el-color-primary-light-5), var(--el-color-primary))',
-        }"
-      ></div>
+    <div class="result-divider my-4 relative">
+      <div class="divider-line"></div>
       <div
         class="absolute left-1/2 transform -translate-x-1/2 -translate-y-1/2 px-4 font-bold"
         :style="{
@@ -196,12 +184,11 @@
 
     <!-- 结果区域 -->
     <div
-      class="result-box rounded-xl mt-4"
+      class="result-box mt-4"
       ref="resultBox"
       :style="{
         background: 'var(--el-bg-color-overlay)',
-        boxShadow: 'var(--el-box-shadow-light)',
-        border: '1px solid var(--el-color-primary-light-7)',
+        border: '1px solid var(--el-border-color-light)',
         height: sizeMana.resultHeight + 40 + 'px',
         overflow: 'auto',
         padding: '1.5rem',
@@ -224,7 +211,7 @@
       >
         <el-empty
           :image-size="$isMobile() ? 200 : 350"
-          :image="require('../../assets/image/empty.png')"
+          :image="emptyImageUrl"
           description="空空如也 ┐(ﾟ～ﾟ)┌ "
           class="anime-empty"
         ></el-empty>
@@ -250,12 +237,14 @@
 </template>
 
 <script>
+import emptyImageUrl from "@/assets/image/empty.png"
 import MyButton from "../ui/MyButton.vue"
 export default {
   components: { MyButton },
   name: "CmdMain",
   data() {
     return {
+      emptyImageUrl,
       sqlMessage: null,
       historyList: [],
       historyIndex: 1,
@@ -329,7 +318,6 @@ export default {
             if (resp.warning) {
               this.$message.warning(resp.warning)
             } else {
-              this.$message.success(resp.info)
               this.commonSqlList = resp.data
             }
           } else {
@@ -406,10 +394,6 @@ export default {
               customClass: "anime-message",
             })
           } else {
-            this.$message.success({
-              message: resp.info,
-              customClass: "anime-message",
-            })
             this.historyTotal = resp.data.total
             this.historyList = resp.data.data
           }
@@ -431,6 +415,18 @@ export default {
 </script>
 
 <style scoped>
+.sql-popover,
+.cmd-main-box,
+.history,
+.result-box {
+  border-radius: 8px;
+}
+
+.divider-line {
+  height: 1px;
+  background: var(--el-border-color-light);
+}
+
 /* 响应式调整 */
 @media (max-width: 768px) {
   .cmd-main {

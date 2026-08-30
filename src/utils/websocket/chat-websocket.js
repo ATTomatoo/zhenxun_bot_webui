@@ -37,19 +37,21 @@ function scheduleReconnect(context) {
 
 async function chatWebsocketOnmessage(event) {
   const data = JSON.parse(event.data)
-  console.log("收到消息:", data)
+  const botInfo = vue.$store.state.botInfo
+  if (!botInfo?.self_id || !Array.isArray(data.message)) return
 
   for (let i = 0; i < data.message.length; i++) {
     const e = data.message[i]
     e.msg = e.msg.replace("&#91;", "[").replace("&#93;", "]")
   }
-  const bot_id = vue.$store.state.botInfo.self_id
+  const bot_id = botInfo.self_id
   if (data.user_id != bot_id) {
     vue.$store.commit("ADD_CHAT_MSG", { chatId: data.object_id, obj: data })
     const type = data.group_id ? "group" : "private"
 
-    window.sortFriendGroupList(type)
-    console.log("data.object_id", data.object_id, vue.$store.state._chatId)
+    if (typeof window.sortFriendGroupList === "function") {
+      window.sortFriendGroupList(type)
+    }
     if (data.object_id == vue.$store.state._chatId) {
       vue.$nextTick(() => {
         var divElement = document.getElementById("chat")
@@ -66,7 +68,7 @@ export default {
   //发送ws方法
   sendMessage: function (botInfo, groupId, userId, msg) {
     return new Promise((resolve, reject) => {
-      if (!msg) {
+      if (!msg || !botInfo?.self_id) {
         return resolve()
       }
 
@@ -106,7 +108,6 @@ export default {
           }
           return resolve(resp)
         })
-      resolve()
     })
   },
   //初始化ws

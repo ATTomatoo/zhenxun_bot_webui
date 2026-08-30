@@ -6,14 +6,14 @@
   >
     <!-- 头像和信息区域 -->
     <div
-      class="avatar-section rounded-xl p-6 shadow-lg transform transition-all hover:scale-[1.01]"
+      class="avatar-section command-surface p-5"
       :style="{ backgroundColor: 'var(--bg-color-secondary)' }"
     >
       <div class="flex flex-col items-center">
         <!-- 头像 -->
         <el-image
           :src="botInfo.ava_url"
-          class="w-24 h-24 rounded-full border-4 shadow-md transition-all"
+          class="w-24 h-24 rounded-full border-2"
           :style="{ borderColor: 'var(--border-color)' }"
           fit="cover"
         >
@@ -39,10 +39,10 @@
 
         <!-- ID -->
         <div
-          class="mt-2 px-3 py-1 text-white rounded-full text-xs font-medium shadow-md"
+          class="bot-id mt-2 px-3 py-1 text-xs font-medium"
           :style="{
-            background:
-              'linear-gradient(to right, var(--primary-color), var(--primary-color-light))',
+            color: 'var(--primary-color)',
+            background: 'var(--bg-color-hover)',
           }"
         >
           ID: {{ botInfo.self_id }}
@@ -185,10 +185,9 @@
         <!-- 应用按钮 -->
         <button
           @click="clickBotManage"
-          class="w-full py-2 text-white rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 text-sm"
+          class="apply-button w-full py-2 text-white text-sm"
           :style="{
-            background:
-              'linear-gradient(to right, var(--primary-color), var(--primary-color-light))',
+            background: 'var(--primary-color)',
           }"
         >
           应用设置
@@ -222,7 +221,7 @@ export default {
     this.botInfo = this.$store.state.botInfo || {}
   },
   mounted() {
-    this.getBotModuleData()
+    if (this.botInfo.self_id) this.getBotModuleData()
     this.calculateHeights()
     window.addEventListener("resize", this.calculateHeights)
   },
@@ -244,6 +243,7 @@ export default {
       })
     },
     handleBotStatus() {
+      if (!this.botInfo.self_id) return
       var loading = this.getLoading(".left-info-container")
 
       this.postRequest(`${this.$root.prefix}/main/change_bot_status`, {
@@ -264,6 +264,7 @@ export default {
       })
     },
     getBotModuleData() {
+      if (!this.botInfo.self_id) return
       var loading = this.getLoading(".left-info-container")
 
       this.getRequest(`${this.$root.prefix}/main/get_bot_block_module`, {
@@ -273,7 +274,6 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.botModuleData.blockPlugins = resp.data.all_plugins
             this.botModuleData.blockTasks = resp.data.all_tasks
             this.postData.blockPlugins = resp.data.block_plugins
@@ -286,6 +286,7 @@ export default {
       })
     },
     clickBotManage() {
+      if (!this.botInfo.self_id) return
       var loading = this.getLoading(".left-info-container")
 
       this.postRequest(`${this.$root.prefix}/main/update_bot_manage`, {
@@ -321,21 +322,31 @@ export default {
 
 .left-info-container {
   @apply flex flex-col h-full p-4 overflow-hidden;
-  gap: 16px; /* 设置两个部分之间的间距 */
+  gap: 12px;
+}
+
+.command-surface,
+.plugin-section {
+  border: 1px solid var(--border-color-light);
+  border-radius: 8px;
+  background: var(--bg-color-secondary);
 }
 
 .avatar-section {
-  @apply rounded-xl p-6 shadow-lg;
-  flex-shrink: 0; /* 防止压缩 */
+  flex-shrink: 0;
 }
 
 .plugin-section {
-  @apply rounded-xl p-6 shadow-lg overflow-y-auto;
-  flex-grow: 1; /* 填充剩余空间 */
-  min-height: 300px; /* 设置最小高度 */
+  @apply p-5 overflow-y-auto;
+  flex-grow: 1;
+  min-height: 300px;
 }
 
-/* 使用全局字体变量 */
+.bot-id,
+.apply-button {
+  border-radius: 6px;
+}
+
 .anime-font {
   font-family: "Mochiy Pop P One", sans-serif;
   font-size: var(--font-size-xl);

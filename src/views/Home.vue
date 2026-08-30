@@ -3,7 +3,7 @@
     <div class="flex">
       <!-- 侧边栏 -->
       <aside
-        class="backdrop-blur-sm shadow-xl fixed md:relative z-50 h-screen flex flex-col transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+        class="app-sidebar fixed md:relative z-50 h-screen flex flex-col"
         :style="{
           width: getMenuWidth(),
           transform: getTransform(),
@@ -14,21 +14,23 @@
           <!-- 顶部内容 -->
           <div class="flex-1 overflow-y-auto">
             <div
-              class="p-4 flex justify-center"
-              style="height: 130px; margin-top: 20px"
+              class="brand-area flex justify-center"
+              :class="{ 'is-collapsed': isCollapsed }"
             >
               <img
                 v-if="!isCollapsed"
-                class="w-48 h-24 object-contain animate-bounce-slow transition-opacity duration-300"
+                class="brand-logo object-contain"
                 :src="logoUrl"
                 alt="Logo"
               />
+              <span v-else class="brand-mark" aria-label="真寻">真</span>
             </div>
 
             <div class="px-2 pb-4">
               <el-menu
-                class="border-0 transition-all duration-300"
+                class="app-menu border-0"
                 @select="handleSelect"
+                :default-active="activeMenu"
                 :background-color="'transparent'"
                 :text-color="'var(--text-color-secondary)'"
                 :active-text-color="'var(--primary-color)'"
@@ -38,11 +40,11 @@
                 <el-menu-item
                   v-for="menu in menus"
                   :key="menu.module"
-                  :index="menu.router"
-                  class="group rounded-lg my-1 transition-all duration-300 flex justify-center"
+                  :index="normalizeRoute(menu.router)"
+                  class="group my-1 flex justify-center"
                   :style="{
                     backgroundColor:
-                      curSelectMenu === menu.router
+                      activeMenu === normalizeRoute(menu.router)
                         ? 'var(--bg-color-hover)'
                         : 'transparent',
                   }"
@@ -52,14 +54,14 @@
                       class="h-8 w-1 rounded-full mr-4 transition-all duration-300"
                       :style="{
                         backgroundColor:
-                          curSelectMenu === menu.router
+                          activeMenu === normalizeRoute(menu.router)
                             ? 'var(--primary-color)'
                             : 'transparent',
                       }"
                     ></span>
                     <svg-icon
                       :icon-class="
-                        curSelectMenu === menu.router
+                        activeMenu === normalizeRoute(menu.router)
                           ? menu.icon + '-select'
                           : menu.icon
                       "
@@ -67,12 +69,12 @@
                       class="w-6 h-6 transition-all duration-300"
                       :style="{
                         '--icon-color':
-                          curSelectMenu === menu.router
+                          activeMenu === normalizeRoute(menu.router)
                             ? 'var(--primary-color)'
                             : 'var(--text-color-secondary)',
                       }"
                       :color="
-                        curSelectMenu === menu.router
+                        activeMenu === normalizeRoute(menu.router)
                           ? 'var(--primary-color)'
                           : 'var(--text-color-secondary)'
                       "
@@ -82,11 +84,13 @@
                       class="ml-3 text-lg font-medium transition-all duration-300"
                       :style="{
                         color:
-                          curSelectMenu === menu.router
+                          activeMenu === normalizeRoute(menu.router)
                             ? 'var(--primary-color)'
                             : 'var(--text-color)',
                         fontWeight:
-                          curSelectMenu === menu.router ? 'bold' : 'normal',
+                          activeMenu === normalizeRoute(menu.router)
+                            ? '600'
+                            : 'normal',
                       }"
                       >{{ menu.name }}</span
                     >
@@ -109,15 +113,15 @@
 
       <!-- 主内容区 -->
       <div
-        class="flex-1 flex flex-col transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+        class="app-content flex-1 flex flex-col"
         :style="{
-          width: isCollapsed ? 'calc(100% - 5.5rem)' : 'calc(100% - 18.5rem)',
+          width: contentWidth,
           overflow: 'hidden',
         }"
       >
         <!-- 顶部导航 -->
         <header
-          class="backdrop-blur-sm shadow-sm p-4 flex items-center justify-between sticky top-0 z-30"
+          class="app-header flex items-center justify-between sticky top-0 z-30"
           :style="{ backgroundColor: 'var(--bg-color-secondary)' }"
         >
           <!-- 移动端菜单按钮 -->
@@ -140,7 +144,7 @@
             <button
               v-if="!isMobile"
               @click="toggleCollapse"
-              class="hidden md:flex items-center p-2 rounded-full transition-all duration-300"
+              class="header-icon-button hidden md:flex items-center"
               :style="{ backgroundColor: 'var(--bg-color-hover)' }"
             >
               <svg-icon
@@ -193,7 +197,7 @@
               </span>
               <el-dropdown-menu
                 slot="dropdown"
-                class="shadow-lg rounded-xl overflow-hidden transition-all duration-300"
+                  class="shadow-lg overflow-hidden"
               >
                 <el-dropdown-item
                   v-for="theme in themes"
@@ -219,7 +223,7 @@
               placement="bottom-end"
               width="280"
               trigger="hover"
-              popper-class="rounded-xl shadow-xl overflow-hidden transition-all duration-300"
+              popper-class="shadow-xl overflow-hidden"
             >
               <div class="max-h-96 overflow-y-auto custom-scrollbar">
                 <div
@@ -255,7 +259,10 @@
               </div>
 
               <template #reference>
-                <div class="flex items-center cursor-pointer group">
+                <div
+                  v-if="botState === 'ready'"
+                  class="bot-switch flex items-center cursor-pointer group"
+                >
                   <span
                     class="mr-2 transition-all duration-300"
                     :style="{ color: 'var(--text-color)' }"
@@ -263,11 +270,20 @@
                     切换账号
                   </span>
                   <el-image
-                    :src="botInfo.ava_url"
+                    :src="botInfo.ava_url || ''"
                     class="w-10 h-10 rounded-full object-cover border-2 shadow-sm transition-all duration-300"
                     :style="{ borderColor: 'var(--primary-color)' }"
                   />
                 </div>
+                <button
+                  v-else
+                  type="button"
+                  class="bot-connect-shortcut"
+                  @click="navigateTo('/protocol')"
+                >
+                  <i class="el-icon-connection"></i>
+                  <span class="hidden lg:inline">连接机器人</span>
+                </button>
               </template>
             </el-popover>
 
@@ -275,6 +291,7 @@
             <el-dropdown
               @command="dropdownClick"
               trigger="click"
+              popper-class="account-dropdown-menu"
               class="rounded-full p-2 transition-all duration-300"
               :style="{ backgroundColor: 'var(--bg-color-hover)' }"
             >
@@ -291,12 +308,11 @@
               </span>
               <el-dropdown-menu
                 slot="dropdown"
-                class="shadow-lg rounded-xl overflow-hidden transition-all duration-300"
+                class="account-dropdown-menu shadow-lg overflow-hidden"
               >
                 <el-dropdown-item
                   command="account-security"
-                  class="flex items-center px-4 py-2 transition-all duration-200"
-                  :style="{ backgroundColor: 'var(--bg-color-hover)' }"
+                  class="account-dropdown-item flex items-center"
                 >
                   <i
                     class="el-icon-lock mr-2"
@@ -307,8 +323,7 @@
                 <el-dropdown-item
                   divided
                   command="logout"
-                  class="flex items-center px-4 py-2 transition-all duration-200"
-                  :style="{ backgroundColor: 'var(--bg-color-hover)' }"
+                  class="account-dropdown-item account-dropdown-danger flex items-center"
                 >
                   <i
                     class="el-icon-switch-button mr-2"
@@ -332,8 +347,15 @@
           }"
           @click="handleMainClick"
         >
+          <bot-required-state
+            v-if="routeRequiresBot && botState !== 'ready'"
+            :state="botState"
+            @configure="navigateTo('/protocol')"
+            @retry="getBotInfo()"
+          />
           <router-view
-            class="backdrop-blur-sm rounded-xl p-6 h-full"
+            v-else
+            class="route-surface h-full"
             :style="{
               backgroundColor: 'var(--bg-color-secondary)',
               height: computedHeight + 'px',
@@ -352,27 +374,30 @@
 
 <script>
 import AccountSecurityDialog from "@/components/account/AccountSecurityDialog"
+import BotRequiredState from "@/components/common/BotRequiredState"
 import logoUrl from "@/assets/image/logo.png"
 import EventBus from "@/utils/event-bus"
 import { clearCookie } from "@/utils/api"
 import { getHeaderHeight } from "@/utils/utils"
 export default {
   name: "MainHome",
-  components: { AccountSecurityDialog },
+  components: { AccountSecurityDialog, BotRequiredState },
   data() {
     return {
       accountSecurityVisible: false,
       logoUrl,
       menuSearch: "",
       socketStates: { status: "connecting", log: "idle", chat: "idle" },
-      asideShow: false, // 默认隐藏菜单栏，移动端会覆盖这个值
+      asideShow: false,
       isCollapsed: false,
       isMobile: false,
+      collapsePreference: null,
       rvKey: 0,
       menus: [],
       botList: [],
       botInfo: {},
-      curSelectMenu: null,
+      botState: "loading",
+      botInitialized: false,
       firstLoad: true,
       windowHeight: window.innerHeight,
       themes: [
@@ -412,6 +437,16 @@ export default {
     },
   },
   computed: {
+    activeMenu() {
+      return this.normalizeRoute(this.$route.path)
+    },
+    routeRequiresBot() {
+      return this.$route.matched.some((record) => record.meta.requiresBot)
+    },
+    contentWidth() {
+      if (this.isMobile) return "100%"
+      return this.isCollapsed ? "calc(100% - 5.5rem)" : "calc(100% - 13.5rem)"
+    },
     computedHeight() {
       return this.windowHeight - getHeaderHeight() + 7
     },
@@ -434,7 +469,10 @@ export default {
     this.$store.dispatch("initStatusSocket")
     window.addEventListener("resize", this.handleResize)
     window.addEventListener("zhenxun-websocket-state", this.handleSocketState)
-    this.checkScreenSize()
+    const savedCollapse = localStorage.getItem("menuCollapsed")
+    this.collapsePreference =
+      savedCollapse == null ? null : savedCollapse === "true"
+    this.applyScreenState(true)
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleResize)
@@ -460,6 +498,21 @@ export default {
     selectSearchResult(menu) {
       this.menuSearch = ""
       this.handleSelect(menu.router)
+    },
+    normalizeRoute(route) {
+      const value = String(route || "/")
+      return value.startsWith("/") ? value : `/${value}`
+    },
+    navigateTo(route) {
+      const target = this.normalizeRoute(route)
+      if (target === this.$route.path) return Promise.resolve(false)
+      return new Promise((resolve) => {
+        this.$router.replace(
+          target,
+          () => resolve(true),
+          () => resolve(false)
+        )
+      })
     },
     dropdownClick(cmd) {
       if (cmd === "account-security") {
@@ -498,24 +551,21 @@ export default {
     },
     handleResize() {
       this.windowHeight = window.innerHeight
-      this.checkScreenSize()
+      this.applyScreenState(false)
     },
-    checkScreenSize() {
+    applyScreenState(initial) {
+      const wasMobile = this.isMobile
       this.isMobile = window.innerWidth <= 768
-
-      // 如果是移动设备或从桌面切换到移动设备
       if (this.isMobile) {
-        this.$nextTick(() => {})
-        this.asideShow = false // 移动端默认隐藏菜单
-        this.isCollapsed = false // 移动端不折叠菜单
-      } else {
-        // 桌面端根据折叠状态显示菜单
-        this.asideShow = !this.isCollapsed
-        console.log("window.innerWidth", window.innerWidth)
-        if (window.innerWidth <= 1500) {
-          this.toggleCollapse()
-        }
+        if (initial || !wasMobile) this.asideShow = false
+        this.isCollapsed = false
+        return
       }
+      this.isCollapsed =
+        this.collapsePreference == null
+          ? window.innerWidth <= 1280
+          : this.collapsePreference
+      this.asideShow = true
     },
     handleMainClick() {
       if (this.isMobile) {
@@ -526,15 +576,12 @@ export default {
         }
       }
     },
-    handleSelect(index) {
-      if (this.isMobile) {
+    async handleSelect(index) {
+      const navigated = await this.navigateTo(index)
+      if (navigated && this.isMobile) {
         this.asideShow = false
+        document.body.style.overflow = ""
       }
-      if (index.charAt(0) !== "/") {
-        index = "/" + index
-      }
-      this.curSelectMenu = index
-      this.$router.replace(index)
     },
     toggleMenu() {
       this.asideShow = !this.asideShow
@@ -545,11 +592,11 @@ export default {
     toggleCollapse() {
       if (!this.isMobile) {
         this.isCollapsed = !this.isCollapsed
+        this.collapsePreference = this.isCollapsed
         localStorage.setItem("menuCollapsed", this.isCollapsed)
-
-        // 确保主内容宽度正确更新
-        this.$nextTick(() => {
-          this.asideShow = !this.isCollapsed
+        EventBus.$emit("sidebar-aside", {
+          asideShow: !this.isCollapsed,
+          timestamp: Date.now(),
         })
       }
     },
@@ -561,20 +608,6 @@ export default {
           } else {
             this.menus = resp.data.menus
             this.$store.commit("SET_BOT_TYPE", resp.data.bot_type)
-            if (this.$route.path == "/") {
-              for (const menu of this.menus) {
-                if (menu.default) {
-                  this.curSelectMenu = menu.router
-                  break
-                }
-              }
-            } else {
-              for (const menu of this.menus) {
-                if (menu.router == this.$route.path) {
-                  this.curSelectMenu = menu.router
-                }
-              }
-            }
           }
         } else {
           this.$message.error(resp.info)
@@ -582,48 +615,34 @@ export default {
       })
     },
     async getBotInfo(bot_id) {
-      this.getRequest(`${this.$root.prefix}/main/get_base_info`, {
-        bot_id,
-      }).then((resp) => {
+      if (!this.botInfo.self_id) this.botState = "loading"
+      try {
+        const resp = await this.getRequest(
+          `${this.$root.prefix}/main/get_base_info`,
+          { bot_id },
+          { suppressErrorToast: true }
+        )
         if (resp.suc) {
-          if (resp.warning) {
-            this.$message.warning(resp.warning)
+          this.botList = resp.data || []
+          if (!this.botList.length) {
+            this.botInfo = {}
+            this.$store.commit("SET_BOT", null)
+            this.botState = "empty"
           } else {
-            this.botList = resp.data || []
-            if (!this.botList.length) {
-              this.$store.state.botInfo = null
-            } else {
-              if (this.$store.state.botInfo) {
-                let is_in = false
-                for (const bot of this.botList) {
-                  if (bot.self_id == this.$store.state.botInfo.self_id) {
-                    is_in = true
-                    break
-                  }
-                }
-                if (!is_in) {
-                  this.$store.state.botInfo = null
-                }
-              }
-              if (this.$store.state.botInfo && !bot_id) {
-                this.botInfo = this.$store.state.botInfo
-                for (const bot of this.botList) {
-                  bot.is_select = bot.self_id == this.botInfo.self_id
-                  if (bot.is_select) {
-                    this.botInfo = bot
-                    this.$store.commit("SET_BOT", bot)
-                  }
-                }
-              } else {
-                for (const bot of this.botList) {
-                  if (bot.is_select) {
-                    this.botInfo = bot
-                    this.$store.commit("SET_BOT", bot)
-                    break
-                  }
-                }
-              }
-            }
+            const persistedId = this.$store.state.botInfo?.self_id
+            const selected =
+              this.botList.find((bot) => bot_id && bot.self_id == bot_id) ||
+              this.botList.find(
+                (bot) => !bot_id && bot.self_id == persistedId
+              ) ||
+              this.botList.find((bot) => bot.is_select) ||
+              this.botList[0]
+            this.botList.forEach((bot) => {
+              this.$set(bot, "is_select", bot.self_id == selected.self_id)
+            })
+            this.botInfo = selected
+            this.$store.commit("SET_BOT", selected)
+            this.botState = "ready"
           }
           this.$store.commit("CLEAR_CHAT")
           if (["/command", "/manage"].includes(this.$route.path)) {
@@ -633,11 +652,14 @@ export default {
               this.rvKey++
             }
           }
-          this.curSelectMenu = this.$route.path
         } else {
-          this.$message.error(resp.info)
+          this.botState = this.botInfo.self_id ? "ready" : "error"
         }
-      })
+      } catch (error) {
+        this.botState = this.botInfo.self_id ? "ready" : "error"
+      } finally {
+        this.botInitialized = true
+      }
     },
     handleThemeChange(command) {
       if (typeof this.setAppTheme === "function") {
@@ -654,7 +676,71 @@ export default {
 </script>
 
 <style scoped>
-/* 自定义滚动条 */
+.app-sidebar,
+.app-content {
+  transition: width 180ms ease, transform 180ms ease;
+}
+
+.app-sidebar {
+  border-right: 1px solid var(--border-color);
+  box-shadow: 4px 0 18px rgba(20, 24, 31, 0.04);
+}
+
+.brand-area {
+  height: 96px;
+  align-items: center;
+  padding: 14px 18px 8px;
+}
+
+.brand-logo {
+  width: 148px;
+  height: 66px;
+}
+
+.brand-area.is-collapsed {
+  height: 70px;
+  padding: 10px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--primary-color);
+  border-radius: 8px;
+  color: var(--primary-color);
+  background: var(--bg-color-hover);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.app-header {
+  min-height: 64px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 2px 10px rgba(20, 24, 31, 0.035);
+}
+
+.header-icon-button,
+.bot-connect-shortcut {
+  min-width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--primary-color);
+  background: var(--bg-color);
+}
+
+.route-surface {
+  min-width: 0;
+  overflow: auto;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -713,26 +799,21 @@ export default {
   background: var(--el-color-success);
 }
 
-/* 缓慢弹跳动画 */
-@keyframes bounce-slow {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-.animate-bounce-slow {
-  animation: bounce-slow 3s infinite;
-}
-
-/* 菜单项悬停效果 */
 ::v-deep .el-menu-item:hover {
   background-color: var(--bg-color-hover) !important;
 }
 ::v-deep .el-menu-item.is-active {
   background-color: var(--bg-color-hover) !important;
+}
+
+::v-deep .app-menu .el-menu-item {
+  height: 46px;
+  border-radius: 6px;
+  line-height: 46px;
+}
+
+::v-deep .app-menu .el-menu-item span {
+  letter-spacing: 0;
 }
 
 /* 响应式调整 */
@@ -755,70 +836,47 @@ export default {
   margin-right: 0;
 }
 
-/* 淡入淡出动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* 旋转动画 */
 .rotate-180 {
   transform: rotate(180deg);
 }
-
-.aside-enter-active,
-.aside-leave-active {
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-    width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.aside-enter,
-.aside-leave-to {
-  transform: translateX(-100%);
-}
-
-/* 菜单项动画 */
-.menu-item-animate {
-  transition: all 0.3s ease;
-  transform-origin: left center;
-}
-
-/* 优化后的弹跳动画 */
-@keyframes smooth-bounce {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
-  }
-  50% {
-    transform: translateY(-12px) scale(1.05);
-    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
-  }
-}
-.animate-smooth-bounce {
-  animation: smooth-bounce 3s infinite;
-}
-
-/* 优化过渡曲线 */
-.smooth-transition {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.main-content {
-  width: calc(100% - var(--sidebar-width));
-  margin-left: var(--sidebar-width);
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1),
-    margin-left 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* 响应式调整 */
 @media (max-width: 768px) {
-  .main-content {
-    width: 100%;
-    margin-left: 0;
-  }
+  .app-header { min-height: 58px; padding: 10px 12px; }
+  .brand-area { height: 84px; }
+}
+</style>
+
+<style>
+.account-dropdown-menu {
+  width: 180px;
+  padding: 5px !important;
+  border-color: var(--border-color) !important;
+  border-radius: 8px !important;
+  background: var(--bg-color-secondary) !important;
+}
+
+.account-dropdown-menu .account-dropdown-item {
+  box-sizing: border-box;
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  padding: 0 12px !important;
+  border-radius: 5px;
+  line-height: 40px;
+  background: transparent !important;
+}
+
+.account-dropdown-menu .account-dropdown-item:hover,
+.account-dropdown-menu .account-dropdown-item:focus {
+  background: var(--bg-color-hover) !important;
+}
+
+.account-dropdown-menu .account-dropdown-danger {
+  margin-top: 5px;
+  border-top: 1px solid var(--border-color) !important;
+  border-radius: 0 0 5px 5px;
+}
+
+.account-dropdown-menu .account-dropdown-danger::before {
+  display: none;
 }
 </style>

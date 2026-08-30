@@ -58,11 +58,11 @@
 
     <!-- 列表内容 -->
     <div
-      class="data-list-container rounded-xl p-2 overflow-y-auto"
+      class="data-list-container p-2 overflow-y-auto"
       :style="{
         height: 'calc(100% - 65px)',
         background: 'var(--el-fill-color-blank)',
-        boxShadow: 'var(--el-box-shadow-light)',
+        border: '1px solid var(--el-border-color-light)',
       }"
     >
       <div
@@ -204,8 +204,13 @@ export default {
     this.botInfo = this.$store.state.botInfo || {}
   },
   mounted() {
-    this.refresh()
+    if (this.botInfo.self_id) this.refresh()
     window.sortFriendGroupList = this.sortFriendGroupList
+  },
+  beforeDestroy() {
+    if (window.sortFriendGroupList === this.sortFriendGroupList) {
+      delete window.sortFriendGroupList
+    }
   },
   methods: {
     sortFriendGroupList(type) {
@@ -237,6 +242,7 @@ export default {
       this.$store.commit("READ_CHAT", data.id)
     },
     refresh() {
+      if (!this.botInfo.self_id) return
       if (this.activeBtn == "private") {
         this.getFriendList()
       } else {
@@ -294,6 +300,7 @@ export default {
       })
     },
     getGroupList() {
+      if (!this.botInfo.self_id) return
       const loading = this.getLoading(".data-list-container")
       this.getRequest(`${this.$root.prefix}/manage/get_group_list`, {
         bot_id: this.botInfo.self_id,
@@ -302,7 +309,6 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.dataList = resp.data.map((e) => {
               return { id: e.group_id, time: 0, ...e }
             })
@@ -315,6 +321,7 @@ export default {
       })
     },
     getFriendList() {
+      if (!this.botInfo.self_id) return
       const loading = this.getLoading(".data-list-container")
       this.getRequest(`${this.$root.prefix}/manage/get_friend_list`, {
         bot_id: this.botInfo.self_id,
@@ -323,7 +330,6 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.dataList = resp.data.map((e) => {
               return { id: e.user_id, time: 0, ...e }
             })
@@ -340,6 +346,10 @@ export default {
 </script>
 
 <style scoped>
+.data-list-container {
+  border-radius: 8px;
+}
+
 /* 二次元风格弹窗 */
 .confirm-box {
   border-radius: 16px !important;

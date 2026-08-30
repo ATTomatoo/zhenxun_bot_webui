@@ -121,9 +121,11 @@ export default {
         if (!trend.suc || !groups.suc || !plugins.suc) {
           throw new Error(trend.info || groups.info || plugins.info || "统计数据加载失败")
         }
-        this.trend = trend.data || { chat: [], call: [], date: [] }
-        this.groups = groups.data || []
-        this.plugins = plugins.data || []
+        this.trend = Array.isArray(trend.data?.date)
+          ? trend.data
+          : { chat: [], call: [], date: [] }
+        this.groups = Array.isArray(groups.data) ? groups.data : []
+        this.plugins = Array.isArray(plugins.data) ? plugins.data : []
         this.loaded = true
       } catch (error) {
         this.error = error?.response?.data?.detail || error.message || "统计数据加载失败"
