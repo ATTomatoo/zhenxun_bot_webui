@@ -1,11 +1,11 @@
 <template>
   <main class="protocol-page" v-loading="loading">
     <header class="page-heading">
-      <div><p class="eyebrow">MESSAGE PLATFORM</p><h1>协议端设置</h1><p>在这里完成凭据验证、配置保存和连接检查。</p></div>
-      <div class="overall-status" :class="{ online: hasAnyConnection }"><span></span>{{ hasAnyConnection ? "已有协议端在线" : "暂无协议端在线" }}</div>
+      <div><p class="eyebrow">BOT CONNECTION</p><h1>机器人接入</h1><p>扫码接入 QQ 官方机器人，或在高级设置中管理其他连接方式。</p></div>
+      <div class="overall-status" :class="{ online: hasAnyConnection }"><span></span>{{ hasAnyConnection ? "已有机器人在线" : "暂无机器人在线" }}</div>
     </header>
 
-    <nav class="platform-grid" aria-label="协议类型">
+    <nav class="platform-grid" aria-label="机器人类型">
       <button v-for="platform in platforms" :key="platform.key" type="button" class="platform-card" :class="{ active: selectedPlatform === platform.key }" @click="selectedPlatform = platform.key">
         <span class="platform-icon" :class="platform.key">{{ platform.short }}</span>
         <span><strong>{{ platform.name }}</strong><small>{{ platform.description }}</small></span>
@@ -14,182 +14,143 @@
     </nav>
 
     <section v-if="selectedPlatform === 'onebot_v11'" class="configuration-section">
-      <div class="section-heading">
-        <div><h2>OneBot V11</h2><p>协议端使用反向 WebSocket 主动连接真寻。</p></div>
-        <el-tag type="primary" effect="plain">反向 WebSocket</el-tag>
-      </div>
+      <div class="section-heading"><div><h2>OneBot V11</h2><p>协议端使用反向 WebSocket 主动连接真寻。</p></div><el-tag type="primary" effect="plain">反向 WebSocket</el-tag></div>
       <el-form class="form-grid" label-position="top">
-        <el-form-item label="连接地址" class="span-2">
-          <div class="copy-field"><code>{{ onebotWebSocketUrl }}</code><el-button size="small" icon="el-icon-document-copy" @click="copyText(onebotWebSocketUrl)">复制</el-button></div>
-        </el-form-item>
+        <el-form-item label="连接地址" class="span-2"><div class="copy-field"><code>{{ onebotWebSocketUrl }}</code><el-button size="small" icon="el-icon-document-copy" @click="copyText(onebotWebSocketUrl)">复制</el-button></div></el-form-item>
         <el-form-item label="Access Token" class="span-2">
-          <el-input v-model="onebotToken" show-password autocomplete="new-password" :placeholder="configuration.onebot.has_access_token ? '已配置，留空表示沿用当前值' : '建议为公网可访问的协议端设置 Token'" />
+          <el-input v-model="onebotToken" show-password autocomplete="new-password" :placeholder="configuration.onebot.has_access_token ? '已配置，留空表示沿用当前值' : '建议设置 Token'" />
           <div class="field-actions"><span>协议端必须填写相同 Token，保存后重启生效。</span><el-button v-if="configuration.onebot.has_access_token" type="text" class="danger-text" @click="clearOnebotToken = !clearOnebotToken">{{ clearOnebotToken ? "取消清除" : "清除现有 Token" }}</el-button></div>
           <el-alert v-if="clearOnebotToken" type="warning" :closable="false" title="保存后将移除 OneBot Access Token。" />
         </el-form-item>
       </el-form>
     </section>
 
-    <section v-else class="configuration-section">
-      <div class="section-heading">
-        <div><h2>QQ 官方机器人</h2><p>先验证机器人身份，再保存并重启官方 Webhook Adapter。</p></div>
-        <div class="switch-line"><span>{{ qqForm.enabled ? "已启用" : "未启用" }}</span><el-switch v-model="qqForm.enabled" /></div>
+    <section v-else class="qq-workspace">
+      <div class="scan-panel">
+        <div class="scan-icon"><i class="el-icon-full-screen"></i></div>
+        <div class="scan-copy">
+          <el-tag size="mini" type="success" effect="plain">推荐</el-tag>
+          <h2>扫码接入 QQ 官方机器人</h2>
+          <p>使用手机 QQ 扫码，选择或创建机器人。完成后真寻会保存凭据，并通过官方 WebSocket 长连接接收消息。</p>
+          <ul><li>无需填写 AppID、Secret 或 Gateway 地址</li><li>凭据仅由 QQ 官方服务与当前真寻实例处理</li></ul>
+        </div>
+        <el-button type="primary" icon="el-icon-full-screen" :loading="registration.starting" @click="startRegistration">扫码接入</el-button>
       </div>
 
-      <el-form v-if="qqForm.enabled" :model="qqForm" label-position="top">
-        <div class="form-grid">
-          <el-form-item label="Webhook 模式">
-            <el-radio-group v-model="qqForm.webhook_mode" size="small">
-              <el-radio-button label="external">自行 HTTPS 反代</el-radio-button>
-              <el-radio-button label="builtin_https">内置 HTTPS</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-          <el-form-item label="公网 HTTPS 基础地址">
-            <el-input v-model.trim="qqForm.public_base_url" placeholder="https://bot.example.com" />
-            <p class="field-help">不要填写 <code>/qq/webhook</code>，系统会自动拼接。</p>
-          </el-form-item>
-        </div>
+      <div v-if="qqConnections.length" class="connected-list">
+        <div class="section-heading compact"><div><h3>已连接机器人</h3><p>当前进程中已完成连接的 QQ 官方机器人。</p></div><el-button size="small" icon="el-icon-refresh" :loading="statusLoading" @click="loadStatus">刷新</el-button></div>
+        <div class="connection-row" v-for="connection in qqConnections" :key="`${connection.adapter}:${connection.self_id}`"><span class="connection-dot"></span><strong>{{ connection.self_id }}</strong><span>QQ_Official · WebSocket</span><el-tag size="mini" type="success">在线</el-tag></div>
+      </div>
 
-        <div class="bot-list-heading"><div><h3>机器人凭据</h3><p>支持多个 AppID；Token 与 Secret 不会在读取配置时回传。</p></div><el-button size="small" icon="el-icon-plus" @click="addBot">添加 Bot</el-button></div>
-        <div class="bot-grid">
-          <article v-for="(bot, index) in qqForm.bots" :key="bot.localKey" class="bot-entry">
-            <header><strong>Bot {{ index + 1 }}</strong><el-button type="text" class="danger-text" icon="el-icon-delete" @click="removeBot(index)">移除</el-button></header>
-            <el-form-item label="AppID"><el-input v-model.trim="bot.id" placeholder="机器人 AppID" /></el-form-item>
-            <el-form-item label="Token"><el-input v-model="bot.token" show-password autocomplete="new-password" :placeholder="bot.has_token ? '已保存，留空沿用' : 'Token'" /></el-form-item>
-            <el-form-item label="Secret"><el-input v-model="bot.secret" show-password autocomplete="new-password" :placeholder="bot.has_secret ? '已保存，留空沿用' : 'Secret'" /></el-form-item>
-            <div class="probe-row">
-              <span v-if="bot.probeResult" class="probe-success"><i class="el-icon-circle-check"></i> {{ bot.probeResult }}</span>
-              <span v-else-if="bot.has_secret && !bot.secret" class="muted">已保存的凭据会在提交时重新验证</span>
-              <span v-else class="muted">验证不会保存凭据</span>
-              <el-button size="small" :loading="bot.probing" :disabled="!canProbeBot(bot)" @click="probeBot(bot)">验证凭据</el-button>
-            </div>
-          </article>
-        </div>
-
-        <div v-if="qqForm.webhook_mode === 'builtin_https'" class="builtin-settings">
-          <div class="section-heading compact"><div><h3>内置 HTTPS</h3><p>需要通过 <code>zx run</code> 启动，并提供可信 PEM 证书。</p></div><el-tag size="mini" :type="configuration.launcher_managed ? 'success' : 'warning'">{{ configuration.launcher_managed ? "Launcher 已托管" : "需要 Launcher" }}</el-tag></div>
-          <div class="form-grid">
-            <el-form-item label="监听地址"><el-input v-model.trim="qqForm.listen_host" placeholder="0.0.0.0" /></el-form-item>
-            <el-form-item label="HTTPS 端口"><el-input-number v-model="qqForm.listen_port" :min="1" :max="65535" controls-position="right" /></el-form-item>
-            <el-form-item label="证书链文件"><el-input v-model.trim="qqForm.tls_certfile" :placeholder="qqForm.has_tls_certfile ? '已配置，留空沿用' : 'C:\\certs\\fullchain.pem'" /></el-form-item>
-            <el-form-item label="私钥文件"><el-input v-model.trim="qqForm.tls_keyfile" show-password :placeholder="qqForm.has_tls_keyfile ? '已配置，留空沿用' : 'C:\\certs\\privkey.pem'" /></el-form-item>
+      <el-collapse v-model="advancedSections" class="advanced-settings">
+        <el-collapse-item name="manual">
+          <template slot="title"><span class="advanced-title"><i class="el-icon-setting"></i> 高级手动配置</span></template>
+          <div class="manual-settings">
+            <div class="section-heading"><div><h2>QQ 官方机器人</h2><p>手动管理多 Bot、Webhook 与已有开放平台凭据。</p></div><div class="switch-line"><span>{{ qqForm.enabled ? "已启用" : "未启用" }}</span><el-switch v-model="qqForm.enabled" /></div></div>
+            <el-form v-if="qqForm.enabled" :model="qqForm" label-position="top">
+              <div v-if="hasWebhookBots" class="form-grid">
+                <el-form-item label="Webhook 模式"><el-radio-group v-model="qqForm.webhook_mode" size="small"><el-radio-button label="external">自行 HTTPS 反代</el-radio-button><el-radio-button label="builtin_https">内置 HTTPS</el-radio-button></el-radio-group></el-form-item>
+                <el-form-item label="公网 HTTPS 基础地址"><el-input v-model.trim="qqForm.public_base_url" placeholder="https://bot.example.com" /><p class="field-help">不要填写 <code>/qq/webhook</code>，系统会自动拼接。</p></el-form-item>
+              </div>
+              <div class="bot-list-heading"><div><h3>机器人凭据</h3><p>WebSocket 会自动获取 Gateway；Token 是旧配置兼容字段，可留空。</p></div><el-button size="small" icon="el-icon-plus" @click="addBot">添加 Bot</el-button></div>
+              <div class="bot-grid">
+                <article v-for="(bot, index) in qqForm.bots" :key="bot.localKey" class="bot-entry">
+                  <header><strong>Bot {{ index + 1 }}</strong><el-button type="text" class="danger-text" icon="el-icon-delete" @click="removeBot(index)">移除</el-button></header>
+                  <el-form-item label="连接方式"><el-radio-group v-model="bot.use_websocket" size="small"><el-radio-button :label="true">WebSocket</el-radio-button><el-radio-button :label="false">Webhook</el-radio-button></el-radio-group><p class="field-help">Gateway 由 QQ 自动下发，不需要手动填写链接。</p></el-form-item>
+                  <el-form-item label="AppID"><el-input v-model.trim="bot.id" placeholder="机器人 AppID" /></el-form-item>
+                  <el-form-item label="Secret"><el-input v-model="bot.secret" show-password autocomplete="new-password" :placeholder="bot.has_secret ? '已保存，留空沿用' : 'AppSecret'" /></el-form-item>
+                  <el-form-item label="Token（兼容旧配置，可选）"><el-input v-model="bot.token" show-password autocomplete="new-password" :placeholder="bot.has_token ? '已保存，留空沿用' : '可留空'" /></el-form-item>
+                  <div class="probe-row"><span v-if="bot.probeResult" class="probe-success"><i class="el-icon-circle-check"></i> {{ bot.probeResult }}</span><span v-else-if="bot.has_secret && !bot.secret" class="muted">已保存的凭据会在提交时重新验证</span><span v-else class="muted">验证不会保存凭据</span><el-button size="small" :loading="bot.probing" :disabled="!canProbeBot(bot)" @click="probeBot(bot)">验证凭据</el-button></div>
+                </article>
+              </div>
+              <div v-if="hasWebhookBots && qqForm.webhook_mode === 'builtin_https'" class="builtin-settings">
+                <div class="section-heading compact"><div><h3>内置 HTTPS</h3><p>需要通过 <code>zx run</code> 启动，并提供可信 PEM 证书。</p></div><el-tag size="mini" :type="configuration.launcher_managed ? 'success' : 'warning'">{{ configuration.launcher_managed ? "Launcher 已托管" : "需要 Launcher" }}</el-tag></div>
+                <div class="form-grid"><el-form-item label="监听地址"><el-input v-model.trim="qqForm.listen_host" placeholder="0.0.0.0" /></el-form-item><el-form-item label="HTTPS 端口"><el-input-number v-model="qqForm.listen_port" :min="1" :max="65535" controls-position="right" /></el-form-item><el-form-item label="证书链文件"><el-input v-model.trim="qqForm.tls_certfile" :placeholder="qqForm.has_tls_certfile ? '已配置，留空沿用' : 'C:\\certs\\fullchain.pem'" /></el-form-item><el-form-item label="私钥文件"><el-input v-model.trim="qqForm.tls_keyfile" show-password :placeholder="qqForm.has_tls_keyfile ? '已配置，留空沿用' : 'C:\\certs\\privkey.pem'" /></el-form-item></div>
+              </div>
+            </el-form>
+            <div v-if="hasWebhookBots" class="callback-panel" :class="{ ready: callbackReady }"><div class="callback-state"><i :class="callbackReady ? 'el-icon-circle-check' : 'el-icon-warning-outline'"></i></div><div><strong>{{ callbackReady ? "Webhook 已准备好" : "Webhook 尚未生效" }}</strong><p>{{ callbackDescription }}</p><code v-if="callbackUrl">{{ callbackUrl }}</code></div><el-button v-if="callbackUrl" size="small" icon="el-icon-document-copy" @click="copyText(callbackUrl)">复制回调地址</el-button></div>
+            <div class="manual-actions"><span>手动配置保存后需要重启；禁用 QQ 时会保留原有凭据。</span><el-button type="primary" :loading="saving" :disabled="!configuration.revision" @click="saveConfiguration">保存并重启</el-button></div>
           </div>
-        </div>
-      </el-form>
-
-      <div class="callback-panel" :class="{ ready: callbackReady }">
-        <div class="callback-state"><i :class="callbackReady ? 'el-icon-circle-check' : 'el-icon-warning-outline'"></i></div>
-        <div><strong>{{ callbackReady ? "Webhook 已准备好" : "Webhook 尚未生效" }}</strong><p>{{ callbackDescription }}</p><code v-if="callbackUrl">{{ callbackUrl }}</code></div>
-        <el-button v-if="callbackUrl" size="small" icon="el-icon-document-copy" @click="copyText(callbackUrl)">复制回调地址</el-button>
-      </div>
+        </el-collapse-item>
+      </el-collapse>
     </section>
 
-    <div class="action-bar">
-      <span>协议环境配置保存后需要重启；禁用 QQ 时会保留原有凭据。</span>
-      <el-button icon="el-icon-refresh" :loading="statusLoading" @click="loadStatus">刷新状态</el-button>
-      <el-button type="primary" :loading="saving" @click="saveConfiguration">保存并重启</el-button>
-    </div>
-
-    <div v-if="restarting" class="restart-overlay"><i class="el-icon-loading"></i><h2>正在重启真寻</h2><p>页面会在服务恢复后自动返回协议端设置。</p></div>
+    <el-dialog title="扫码接入 QQ 官方机器人" :visible.sync="registration.visible" width="min(420px, calc(100vw - 32px))" custom-class="qq-registration-dialog" :close-on-click-modal="false" :before-close="closeRegistration">
+      <div class="qr-dialog-body">
+        <div class="qr-frame" :class="registration.status"><img v-if="registration.qrDataUrl" :src="registration.qrDataUrl" alt="QQ 官方机器人绑定二维码" /><i v-else-if="registration.starting" class="el-icon-loading"></i><i v-else class="el-icon-warning-outline"></i></div>
+        <h3>{{ registrationTitle }}</h3><p>{{ registrationDescription }}</p>
+        <el-alert v-if="registration.error" type="error" :closable="false" :title="registration.error" />
+        <el-button v-if="registration.qrUrl && registration.status === 'pending'" type="text" @click="openRegistrationUrl">在当前设备打开 QQ 绑定页</el-button>
+      </div>
+      <span slot="footer" class="dialog-footer"><el-button v-if="registration.status === 'error' || registration.status === 'expired'" @click="startRegistration">重新生成</el-button><el-button @click="closeRegistration">{{ registration.status === "completed" ? "完成" : "取消" }}</el-button></span>
+    </el-dialog>
   </main>
 </template>
 
 <script>
+import { apiErrorDetail } from "@/utils/api-error"
+import { startRestartRecovery } from "@/utils/restart-recovery"
+
 let botKey = 0
-const emptyBot = () => ({ localKey: `bot-${++botKey}`, id: "", token: "", secret: "", has_token: false, has_secret: false, probing: false, probeResult: "" })
+const emptyBot = () => ({ localKey: `bot-${++botKey}`, id: "", token: "", secret: "", use_websocket: true, has_token: false, has_secret: false, probing: false, probeResult: "" })
+const emptyRegistration = () => ({ visible: false, starting: false, registrationId: "", qrDataUrl: "", qrUrl: "", status: "idle", error: "", interval: 2, expiresAt: 0 })
 
 export default {
   name: "ProtocolSetting",
   data() {
     return {
-      selectedPlatform: "onebot_v11", loading: false, saving: false, statusLoading: false, restarting: false,
+      selectedPlatform: "qq_official", loading: false, saving: false, statusLoading: false,
       status: { onebot_v11_connected: false, qq_official_enabled: false, qq_official_connected: false, qq_webhook_mode: "external", qq_webhook_callback_url: null, connections: [], onebot_v11_reverse_ws_path: "/onebot/v11/ws", qq_webhook_path: "/qq/webhook" },
       configuration: { revision: "", launcher_managed: false, onebot: { has_access_token: false }, qq: { bots: [] } },
-      onebotToken: "", clearOnebotToken: false,
+      onebotToken: "", clearOnebotToken: false, advancedSections: [], registration: emptyRegistration(), registrationTimer: null,
       qqForm: { enabled: false, bots: [], webhook_mode: "external", public_base_url: "", listen_host: "0.0.0.0", listen_port: 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: false, has_tls_keyfile: false },
     }
   },
   computed: {
     onebotWebSocketUrl() { const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"; return `${scheme}//${window.location.host}${this.status.onebot_v11_reverse_ws_path}` },
     hasAnyConnection() { return this.status.connections.length > 0 },
-    platforms() {
-      return [
-        { key: "onebot_v11", short: "OB", name: "OneBot V11", description: "QQ · 反向 WebSocket", connected: this.status.onebot_v11_connected, status: this.status.onebot_v11_connected ? "已连接" : "未连接" },
-        { key: "qq_official", short: "QQ", name: "QQ 官方机器人", description: "QQ 开放平台 · HTTPS Webhook", connected: this.status.qq_official_connected, status: this.status.qq_official_connected ? "已连接" : this.qqForm.enabled ? "等待重启" : "未启用" },
-      ]
-    },
+    hasWebhookBots() { return this.qqForm.bots.some((bot) => !bot.use_websocket) },
+    qqConnections() { return this.status.connections.filter((item) => item.platform === "qq_official") },
+    platforms() { return [{ key: "qq_official", short: "QQ", name: "QQ 官方机器人", description: "扫码接入 · 官方 WebSocket", connected: this.status.qq_official_connected, status: this.status.qq_official_connected ? "已连接" : this.qqForm.enabled ? "等待连接" : "未接入" }, { key: "onebot_v11", short: "OB", name: "OneBot V11", description: "高级接入 · 反向 WebSocket", connected: this.status.onebot_v11_connected, status: this.status.onebot_v11_connected ? "已连接" : "未连接" }] },
     callbackUrl() { return this.status.qq_webhook_callback_url || (this.qqForm.public_base_url ? `${this.qqForm.public_base_url.replace(/\/$/, "")}/qq/webhook` : "") },
     callbackReady() { return Boolean(this.status.qq_official_connected && this.callbackUrl) },
-    callbackDescription() {
-      if (!this.qqForm.enabled) return "启用适配器并填写 Bot 配置后，系统会生成回调地址。"
-      if (!this.callbackUrl) return "请先填写公网 HTTPS 基础地址。"
-      if (!this.status.qq_official_connected) return "配置已填写；保存并重启、Bot 预热成功后即可复制到 QQ 开放平台。"
-      return "Bot 已完成 API me 预热，可将下面地址填写到 QQ 开放平台。"
-    },
+    callbackDescription() { if (!this.qqForm.enabled) return "启用适配器并填写 Bot 配置后，系统会生成回调地址。"; if (!this.callbackUrl) return "请先填写公网 HTTPS 基础地址。"; if (!this.status.qq_official_connected) return "保存并重启、Bot 预热成功后即可配置回调地址。"; return "Bot 已完成 API me 预热，可将下面地址填写到 QQ 开放平台。" },
+    registrationTitle() { return { pending: "等待扫码", completed: "机器人接入成功", expired: "二维码已过期", error: "接入未完成" }[this.registration.status] || "正在创建二维码" },
+    registrationDescription() { if (this.registration.status === "completed") return "配置已安全保存，正在准备重新连接。"; if (this.registration.status === "expired") return "请重新生成二维码后再扫描。"; if (this.registration.status === "error") return "可以重试当前操作或重新生成二维码。"; return "使用手机 QQ 扫描二维码，并按页面提示选择或创建机器人。" },
   },
-  async mounted() {
-    await Promise.all([this.loadConfiguration(), this.loadStatus()])
-    if (sessionStorage.getItem("protocol_restart_pending")) {
-      sessionStorage.removeItem("protocol_restart_pending"); this.selectedPlatform = "qq_official"; this.waitForConnection()
-    }
-  },
+  async mounted() { await Promise.all([this.loadConfiguration(), this.loadStatus()]) },
+  beforeDestroy() { this.clearRegistrationTimer() },
   methods: {
     async loadConfiguration() {
       this.loading = true
-      try {
-        const response = await this.getRequest(`${this.$root.prefix}/protocol/configuration`, {}, { suppressErrorToast: true })
-        if (!response || !response.suc) throw new Error(response && response.info)
-        this.configuration = response.data; const qq = response.data.qq
-        this.qqForm = { enabled: qq.enabled, bots: (qq.bots || []).map((bot) => ({ ...emptyBot(), ...bot })), webhook_mode: qq.webhook_mode || "external", public_base_url: qq.public_base_url || "", listen_host: qq.listen_host || "0.0.0.0", listen_port: qq.listen_port || 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: qq.has_tls_certfile, has_tls_keyfile: qq.has_tls_keyfile }
-        if (!this.qqForm.bots.length) this.qqForm.bots.push(emptyBot())
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "协议配置读取失败。") }
-      finally { this.loading = false }
+      try { const response = await this.getRequest(`${this.$root.prefix}/protocol/configuration`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration = response.data; const qq = response.data.qq; this.qqForm = { enabled: qq.enabled, bots: (qq.bots || []).map((bot) => ({ ...emptyBot(), ...bot, use_websocket: Boolean(qq.bot_modes?.[bot.id]) })), webhook_mode: qq.webhook_mode || "external", public_base_url: qq.public_base_url || "", listen_host: qq.listen_host || "0.0.0.0", listen_port: qq.listen_port || 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: qq.has_tls_certfile, has_tls_keyfile: qq.has_tls_keyfile }; if (!this.qqForm.bots.length) this.qqForm.bots.push(emptyBot()) }
+      catch (error) { this.$message.error(apiErrorDetail(error, "机器人配置读取失败。")) } finally { this.loading = false }
     },
-    async loadStatus() {
-      this.statusLoading = true
-      try { const response = await this.getRequest(`${this.$root.prefix}/protocol/status`, {}, { suppressErrorToast: true }); if (response && response.suc) this.status = response.data }
-      finally { this.statusLoading = false }
+    async loadStatus() { this.statusLoading = true; try { const response = await this.getRequest(`${this.$root.prefix}/protocol/status`, {}, { suppressErrorToast: true }); if (response && response.suc) this.status = response.data } finally { this.statusLoading = false } },
+    clearRegistrationTimer() { if (this.registrationTimer) window.clearTimeout(this.registrationTimer); this.registrationTimer = null },
+    async startRegistration() {
+      this.clearRegistrationTimer(); if (this.registration.registrationId) await this.cancelRegistrationSession(); this.registration = { ...emptyRegistration(), visible: true, starting: true, status: "starting" }
+      try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/registration/start`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); const QRModule = await import(/* webpackChunkName: "qrcode" */ "qrcode"); const QRCode = QRModule.default || QRModule; const qrDataUrl = await QRCode.toDataURL(response.data.qr_url, { width: 260, margin: 1, errorCorrectionLevel: "M" }); this.registration = { visible: true, starting: false, registrationId: response.data.registration_id, qrDataUrl, qrUrl: response.data.qr_url, status: "pending", error: "", interval: response.data.interval || 2, expiresAt: Date.now() + (response.data.expires_in || 600) * 1000 }; this.scheduleRegistrationPoll(0) }
+      catch (error) { this.registration.starting = false; this.registration.status = "error"; this.registration.error = apiErrorDetail(error, "二维码生成失败，请稍后重试。") }
     },
-    addBot() { this.qqForm.bots.push(emptyBot()) },
-    removeBot(index) { this.qqForm.bots.splice(index, 1); if (!this.qqForm.bots.length) this.qqForm.bots.push(emptyBot()) },
-    canProbeBot(bot) { return Boolean(bot.id && (bot.token || bot.has_token) && (bot.secret || bot.has_secret)) },
-    async probeBot(bot) {
-      bot.probing = true; bot.probeResult = ""
-      try {
-        const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/probe`, { id: bot.id, token: bot.token || null, secret: bot.secret || null })
-        if (!response || !response.suc) throw new Error(response && response.info)
-        bot.probeResult = response.data.username || response.data.bot_id || "凭据有效"
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "凭据验证失败。") }
-      finally { bot.probing = false }
+    scheduleRegistrationPoll(delay) { this.clearRegistrationTimer(); this.registrationTimer = window.setTimeout(() => this.pollRegistration(), delay == null ? this.registration.interval * 1000 : delay) },
+    async pollRegistration() {
+      if (!this.registration.registrationId || this.registration.status !== "pending") return
+      if (Date.now() >= this.registration.expiresAt) { this.registration.status = "expired"; return }
+      try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/registration/${encodeURIComponent(this.registration.registrationId)}/poll`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); if (response.data.status === "expired") { this.registration.status = "expired"; return } if (response.data.status !== "completed") { this.scheduleRegistrationPoll((response.data.retry_after || this.registration.interval) * 1000); return } this.registration.status = "completed"; this.registration.registrationId = ""; this.registration.qrDataUrl = ""; this.configuration.revision = response.data.revision; this.$message.success(`QQ 官方机器人 ${response.data.bot.username || response.data.bot.app_id} 已接入`); if (response.data.restart_available) await this.restart(response.data.access_urls || []); else { await this.loadConfiguration(); this.$message.warning("配置已保存，请手动重启真寻后连接机器人。") } }
+      catch (error) { this.registration.status = "error"; this.registration.error = apiErrorDetail(error, "扫码状态查询失败，请重试。") }
     },
+    async cancelRegistrationSession() { const id = this.registration.registrationId; this.registration.registrationId = ""; if (!id) return; try { await this.deleteRequest(`${this.$root.prefix}/protocol/qq/registration/${encodeURIComponent(id)}`, {}, { suppressErrorToast: true }) } catch (error) { /* 服务端会自动清理过期会话。 */ } },
+    async closeRegistration(done) { this.clearRegistrationTimer(); await this.cancelRegistrationSession(); this.registration.visible = false; if (typeof done === "function") done() },
+    openRegistrationUrl() { if (this.registration.qrUrl) window.open(this.registration.qrUrl, "_blank", "noopener,noreferrer") },
+    addBot() { this.qqForm.bots.push(emptyBot()) }, removeBot(index) { this.qqForm.bots.splice(index, 1); if (!this.qqForm.bots.length) this.qqForm.bots.push(emptyBot()) }, canProbeBot(bot) { return Boolean(bot.id && (bot.secret || bot.has_secret)) },
+    async probeBot(bot) { bot.probing = true; bot.probeResult = ""; try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/probe`, { id: bot.id, token: bot.token || null, secret: bot.secret || null }); if (!response || !response.suc) throw new Error(response && response.info); bot.probeResult = response.data.username || response.data.bot_id || "凭据有效" } catch (error) { this.$message.error(apiErrorDetail(error, "凭据验证失败。")) } finally { bot.probing = false } },
     async saveConfiguration() {
       this.saving = true
-      try {
-        const response = await this.putRequest(`${this.$root.prefix}/protocol/configuration`, {
-          expected_revision: this.configuration.revision, onebot_access_token: this.onebotToken || null, clear_onebot_access_token: this.clearOnebotToken,
-          qq_enabled: this.qqForm.enabled, qq_bots: this.qqForm.bots.map((bot) => ({ id: bot.id, token: bot.token || null, secret: bot.secret || null })),
-          qq_webhook_mode: this.qqForm.webhook_mode, qq_webhook_public_base_url: this.qqForm.public_base_url, qq_webhook_listen_host: this.qqForm.listen_host,
-          qq_webhook_listen_port: this.qqForm.listen_port, qq_webhook_tls_certfile: this.qqForm.tls_certfile, qq_webhook_tls_keyfile: this.qqForm.tls_keyfile,
-        })
-        if (!response || !response.suc) throw new Error(response && response.info)
-        this.configuration.revision = response.data.revision; this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart()
-        else this.$message.warning("配置已保存，请手动重启真寻后生效。")
-      } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "协议配置保存失败。") }
-      finally { this.saving = false }
+      try { const response = await this.putRequest(`${this.$root.prefix}/protocol/configuration`, { expected_revision: this.configuration.revision, onebot_access_token: this.onebotToken || null, clear_onebot_access_token: this.clearOnebotToken, qq_enabled: this.qqForm.enabled, qq_bots: this.qqForm.bots.map((bot) => ({ id: bot.id, token: bot.token || null, secret: bot.secret || null, use_websocket: bot.use_websocket })), qq_webhook_mode: this.qqForm.webhook_mode, qq_webhook_public_base_url: this.qqForm.public_base_url, qq_webhook_listen_host: this.qqForm.listen_host, qq_webhook_listen_port: this.qqForm.listen_port, qq_webhook_tls_certfile: this.qqForm.tls_certfile, qq_webhook_tls_keyfile: this.qqForm.tls_keyfile }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration.revision = response.data.revision; this.$message.success(response.info); if (response.data.restart_available) await this.restart(response.data.access_urls || []); else this.$message.warning("配置已保存，请手动重启真寻后生效。") }
+      catch (error) { this.$message.error(apiErrorDetail(error, "机器人配置保存失败。")) } finally { this.saving = false }
     },
-    async restart() {
-      sessionStorage.setItem("protocol_restart_pending", "1")
-      const response = await this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {})
-      if (!response || !response.suc) { sessionStorage.removeItem("protocol_restart_pending"); throw new Error(response && response.info) }
-      this.restarting = true
-      for (let attempt = 0; attempt < 80; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-        try { const check = await fetch(`${window.location.origin}${this.$root.prefix}/configure/status`, { cache: "no-store" }); if (check.ok) { window.location.replace(`${window.location.origin}/#/protocol`); return } } catch (error) { /* Expected while restarting. */ }
-      }
-      this.restarting = false; this.$message.warning("重启等待超时，请稍后手动刷新页面。")
-    },
-    async waitForConnection() { for (let attempt = 0; attempt < 40; attempt += 1) { await this.loadStatus(); if (this.status.qq_official_connected) return; await new Promise((resolve) => setTimeout(resolve, 1500)) } },
+    async restart(accessUrls = []) { const response = await this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}); if (!response || !response.suc) throw new Error(response && response.info); this.registration.visible = false; startRestartRecovery({ bootId: response.data.boot_id, accessUrls: accessUrls.length ? accessUrls : response.data.access_urls, returnRoute: "/protocol", message: "QQ 官方机器人将在新进程中建立 WebSocket 长连接。" }) },
     async copyText(value) { try { await navigator.clipboard.writeText(value) } catch (error) { const input = document.createElement("textarea"); input.value = value; input.style.position = "fixed"; input.style.opacity = "0"; document.body.appendChild(input); input.select(); document.execCommand("copy"); input.remove() } this.$message.success("已复制") },
   },
 }
@@ -198,11 +159,13 @@ export default {
 <style lang="scss" scoped>
 .protocol-page { height: 100%; overflow-y: auto; padding: 4px 6px 84px; color: var(--text-color); }.page-heading, .section-heading, .bot-list-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.page-heading { margin-bottom: 22px; }.page-heading h1 { margin: 4px 0 7px; font-size: 30px; }.page-heading p, .section-heading p, .bot-list-heading p { margin: 0; color: var(--text-color-secondary); line-height: 1.6; }.eyebrow { color: var(--primary-color) !important; font-size: 12px; font-weight: 700; letter-spacing: .14em; }
 .overall-status { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--border-color-light); border-radius: 20px; color: var(--text-color-secondary); }.overall-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--text-color-placeholder); }.overall-status.online { color: var(--success-color); }.overall-status.online span { background: var(--success-color); }
-.platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }.platform-card { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 13px 15px; border: 1px solid var(--border-color-light); border-radius: 7px; color: var(--text-color); background: var(--bg-color-secondary); cursor: pointer; text-align: left; }.platform-card.active { border-color: var(--primary-color); box-shadow: 0 3px 12px rgba(255,107,149,.1); }.platform-card > span:nth-child(2) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }.platform-card small { color: var(--text-color-secondary); }.platform-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 7px; color: #fff; font-weight: 700; background: #7564dd; }.platform-icon.qq_official { background: #2385e8; }
-.configuration-section { padding: 22px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color-secondary); }.section-heading { padding-bottom: 18px; border-bottom: 1px solid var(--border-color-light); }.section-heading h2, .bot-list-heading h3, .section-heading h3 { margin: 0 0 5px; }.switch-line { display: flex; align-items: center; gap: 10px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; padding-top: 18px; }.span-2 { grid-column: span 2; }.copy-field { display: flex; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border-color-light); border-radius: 5px; background: var(--bg-color); }.copy-field code { min-width: 0; flex: 1; overflow-wrap: anywhere; }.field-actions, .probe-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--text-color-secondary); font-size: 12px; }.danger-text { color: var(--danger-color, #e05260) !important; }.field-help { margin: 5px 0 0; color: var(--text-color-secondary); font-size: 12px; }
-.bot-list-heading { align-items: center; margin-top: 16px; padding: 18px 0 12px; }.bot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.bot-entry { padding: 16px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color); }.bot-entry header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }.probe-success { color: var(--success-color); }.muted { color: var(--text-color-secondary); }.builtin-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-color-light); }.section-heading.compact { padding-bottom: 12px; }
-.callback-panel { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 16px; border: 1px solid rgba(214,158,46,.4); border-radius: 7px; background: rgba(214,158,46,.06); }.callback-panel.ready { border-color: rgba(56,161,105,.4); background: rgba(56,161,105,.06); }.callback-state { font-size: 27px; color: #c59027; }.callback-panel.ready .callback-state { color: var(--success-color); }.callback-panel > div:nth-child(2) { min-width: 0; flex: 1; }.callback-panel p { margin: 4px 0; color: var(--text-color-secondary); }.callback-panel code { overflow-wrap: anywhere; color: var(--text-color); }
-.action-bar { position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 16px; padding: 12px 4px; border-top: 1px solid var(--border-color-light); background: var(--bg-color); }.action-bar > span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.restart-overlay { position: fixed; inset: 0; z-index: 5000; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(250,251,253,.97); color: #30333a; }.restart-overlay > i { color: #c74e80; font-size: 42px; }
-@media (max-width: 900px) { .platform-grid, .form-grid, .bot-grid { grid-template-columns: 1fr; }.span-2 { grid-column: span 1; }.callback-panel { align-items: flex-start; flex-direction: column; } }
-@media (max-width: 640px) { .page-heading, .section-heading, .bot-list-heading { align-items: stretch; flex-direction: column; }.platform-grid { grid-template-columns: 1fr; }.configuration-section { padding: 16px; }.action-bar { flex-wrap: wrap; }.action-bar > span { width: 100%; }.action-bar .el-button { flex: 1; }.field-actions, .probe-row { align-items: flex-start; flex-direction: column; } }
+.platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }.platform-card { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 13px 15px; border: 1px solid var(--border-color-light); border-radius: 7px; color: var(--text-color); background: var(--bg-color-secondary); cursor: pointer; text-align: left; }.platform-card.active { border-color: var(--primary-color); box-shadow: 0 3px 12px rgba(255,107,149,.1); }.platform-card > span:nth-child(2) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }.platform-card small { color: var(--text-color-secondary); }.platform-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 7px; color: #fff; font-weight: 700; background: #7564dd; }.platform-icon.qq_official { background: #0891b2; }
+.configuration-section, .scan-panel, .connected-list, .manual-settings { padding: 22px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color-secondary); }.scan-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 20px; }.scan-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 7px; color: #087f96; background: rgba(8,145,178,.1); font-size: 28px; }.scan-copy h2 { margin: 8px 0 6px; }.scan-copy p { margin: 0; color: var(--text-color-secondary); line-height: 1.6; }.scan-copy ul { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 0; padding-left: 18px; color: var(--text-color-secondary); font-size: 12px; }
+.connected-list { margin-top: 14px; }.connection-row { display: grid; grid-template-columns: auto minmax(100px, auto) 1fr auto; align-items: center; gap: 10px; padding: 13px 0; border-top: 1px solid var(--border-color-light); }.connection-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success-color); }.connection-row > span:nth-child(3) { color: var(--text-color-secondary); }
+.advanced-settings { margin-top: 14px; border: 0; }.advanced-title { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }.advanced-settings ::v-deep .el-collapse-item__header { padding: 0 14px; border: 1px solid var(--border-color-light); color: var(--text-color); background: var(--bg-color-secondary); }.advanced-settings ::v-deep .el-collapse-item__wrap { border: 0; background: transparent; }.advanced-settings ::v-deep .el-collapse-item__content { padding: 12px 0 0; }
+.section-heading { padding-bottom: 18px; border-bottom: 1px solid var(--border-color-light); }.section-heading h2, .bot-list-heading h3, .section-heading h3 { margin: 0 0 5px; }.section-heading.compact { padding-bottom: 12px; }.switch-line { display: flex; align-items: center; gap: 10px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; padding-top: 18px; }.span-2 { grid-column: span 2; }.copy-field { display: flex; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border-color-light); border-radius: 5px; background: var(--bg-color); }.copy-field code { min-width: 0; flex: 1; overflow-wrap: anywhere; }.field-actions, .probe-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--text-color-secondary); font-size: 12px; }.danger-text { color: var(--danger-color, #e05260) !important; }.field-help { margin: 5px 0 0; color: var(--text-color-secondary); font-size: 12px; }
+.bot-list-heading { align-items: center; margin-top: 16px; padding: 18px 0 12px; }.bot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.bot-entry { padding: 16px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color); }.bot-entry header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }.probe-success { color: var(--success-color); }.muted { color: var(--text-color-secondary); }.builtin-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-color-light); }.callback-panel { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 16px; border: 1px solid rgba(214,158,46,.4); border-radius: 7px; background: rgba(214,158,46,.06); }.callback-panel.ready { border-color: rgba(56,161,105,.4); background: rgba(56,161,105,.06); }.callback-state { font-size: 27px; color: #c59027; }.callback-panel.ready .callback-state { color: var(--success-color); }.callback-panel > div:nth-child(2) { min-width: 0; flex: 1; }.callback-panel p { margin: 4px 0; color: var(--text-color-secondary); }.callback-panel code { overflow-wrap: anywhere; color: var(--text-color); }
+.manual-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color-light); }.manual-actions span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.qr-dialog-body { display: flex; align-items: center; flex-direction: column; text-align: center; }.qr-frame { display: grid; width: 282px; height: 282px; place-items: center; border: 1px solid var(--border-color-light); border-radius: 7px; background: #fff; }.qr-frame img { display: block; width: 260px; height: 260px; }.qr-frame > i { color: #8a9099; font-size: 38px; }.qr-dialog-body h3 { margin: 18px 0 7px; }.qr-dialog-body p { margin: 0 0 10px; color: var(--text-color-secondary); line-height: 1.6; }.qr-dialog-body .el-alert { margin-top: 8px; text-align: left; }
+@media (max-width: 900px) { .platform-grid, .form-grid, .bot-grid { grid-template-columns: 1fr; }.span-2 { grid-column: span 1; }.scan-panel { grid-template-columns: auto 1fr; }.scan-panel > .el-button { grid-column: 2; justify-self: start; }.callback-panel { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 640px) { .page-heading, .section-heading, .bot-list-heading { align-items: stretch; flex-direction: column; }.configuration-section, .scan-panel, .connected-list, .manual-settings { padding: 16px; }.scan-panel { display: flex; align-items: stretch; flex-direction: column; }.scan-icon { width: 48px; height: 48px; }.scan-copy ul { display: block; }.connection-row { grid-template-columns: auto 1fr auto; }.connection-row > span:nth-child(3) { display: none; }.manual-actions { align-items: stretch; flex-direction: column; }.manual-actions span { margin: 0; }.field-actions, .probe-row { align-items: flex-start; flex-direction: column; }.qr-frame { width: min(282px, 78vw); height: min(282px, 78vw); }.qr-frame img { width: min(260px, 72vw); height: min(260px, 72vw); } }
 </style>

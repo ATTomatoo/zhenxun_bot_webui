@@ -7,11 +7,17 @@
     <p>{{ description }}</p>
     <div class="state-actions">
       <el-button
-        v-if="state !== 'loading'"
+        v-if="state !== 'loading' && state !== 'unsupported'"
         type="primary"
         icon="el-icon-connection"
         @click="$emit('configure')"
       >前往协议端设置</el-button>
+      <el-button
+        v-if="state === 'unsupported'"
+        type="primary"
+        icon="el-icon-sort"
+        @click="$emit('switch-supported')"
+      >切换到 OneBot 账号</el-button>
       <el-button
         :loading="state === 'loading'"
         icon="el-icon-refresh"
@@ -28,23 +34,27 @@ export default {
     state: {
       type: String,
       default: "empty",
-      validator: (value) => ["loading", "empty", "error"].includes(value),
+      validator: (value) =>
+        ["loading", "empty", "error", "unsupported"].includes(value),
     },
   },
   computed: {
     iconClass() {
       if (this.state === "loading") return "el-icon-loading"
       if (this.state === "error") return "el-icon-warning-outline"
+      if (this.state === "unsupported") return "el-icon-info"
       return "el-icon-connection"
     },
     title() {
       if (this.state === "loading") return "正在检查机器人连接"
       if (this.state === "error") return "暂时无法读取机器人状态"
+      if (this.state === "unsupported") return "当前账号不支持此管理功能"
       return "还没有机器人连接"
     },
     description() {
       if (this.state === "loading") return "连接信息就绪后会自动打开当前页面。"
       if (this.state === "error") return "可以重新检查，或前往协议端设置确认连接状态。"
+      if (this.state === "unsupported") return "QQ 官方 Bot 已正常连接，但此页面依赖 OneBot 的好友、群组或管理接口。"
       return "连接机器人后即可使用当前管理功能，其他 WebUI 页面仍可正常访问。"
     },
   },

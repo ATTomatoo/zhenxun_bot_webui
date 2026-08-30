@@ -1,4 +1,13 @@
 import { getBaseUrl, getCookie } from "@/utils/api"
+import { handleAuthenticationExpired } from "@/utils/auth-session"
+
+export const AUTH_EXPIRED_CLOSE_CODE = 4401
+
+export const handleAuthenticatedWebSocketClose = (event) => {
+  if (event.code !== AUTH_EXPIRED_CLOSE_CODE) return false
+  handleAuthenticationExpired(true)
+  return true
+}
 
 export const emitWebSocketState = (channel, status) => {
   window.dispatchEvent(

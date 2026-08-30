@@ -280,21 +280,13 @@
       </template>
     </section>
 
-    <div v-if="restarting" class="restart-overlay">
-      <i class="el-icon-loading" />
-      <h2>正在重启真寻</h2>
-      <p>正在检查新地址，页面会在服务恢复后自动跳转。</p>
-      <div v-if="restartTimedOut" class="restart-addresses">
-        <a v-for="url in restartUrls" :key="url" :href="`${url}/#/`">{{ url }}</a>
-        <el-button @click="pollRestart">重新检查</el-button>
-      </div>
-    </div>
   </main>
 </template>
 
 <script>
 import logoUrl from "@/assets/image/logo.png"
 import { buildRestartTargets } from "@/utils/restart-targets"
+import { startRestartRecovery } from "@/utils/restart-recovery"
 
 const SETUP_TOKEN_KEY = "zhenxunSetupToken"
 const RESTART_RECEIPT_KEY = "zhenxunSetupRestartReceipt"
@@ -354,8 +346,6 @@ export default {
       acceptWarnings: false,
       applying: false,
       applyError: "",
-      restarting: false,
-      restartTimedOut: false,
       restartUrls: [],
       databaseOptions: [
         { value: "sqlite", label: "SQLite", description: "无需独立服务，适合单机", recommended: true },
@@ -563,8 +553,13 @@ export default {
           this.applyError = restart.info || "重启请求未被接受。"
           return
         }
-        this.restarting = true
-        await this.pollRestart()
+        startRestartRecovery({
+          bootId: restart.data.boot_id,
+          accessUrls: this.restartUrls,
+          returnRoute: "/",
+          message: "首次配置已保存，正在等待新进程完成启动。",
+          setup: true,
+        })
       } catch (error) {
         this.applyError = (error.response && error.response.data && error.response.data.detail) || "保存配置时发生错误。"
       } finally {
@@ -578,30 +573,6 @@ export default {
         port: this.network.port,
         accessUrls: urls,
       })
-    },
-    async pollRestart() {
-      this.restarting = true
-      this.restartTimedOut = false
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-        for (const baseUrl of this.restartUrls) {
-          try {
-            const response = await fetch(`${baseUrl}${this.$root.prefix}/configure/status`, { cache: "no-store" })
-            if (response.ok) {
-              const payload = await response.json()
-              if (payload.data && payload.data.state === "configured") {
-                window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
-                window.sessionStorage.removeItem(RESTART_RECEIPT_KEY)
-                window.location.replace(`${baseUrl}/#/`)
-                return
-              }
-            }
-          } catch (error) {
-            // A connection failure is expected while the worker restarts.
-          }
-        }
-      }
-      this.restartTimedOut = true
     },
   },
 }
@@ -674,11 +645,6 @@ h1 { font-family: "fzrzFont", sans-serif; font-size: 25px; letter-spacing: 0; }
 .setup-actions .el-button { min-height: 40px; }
 .final-action { min-height: 40px; border: 1px solid #cf588a; border-radius: 4px; color: #fff; background: #cf588a; cursor: pointer; }
 .final-action:disabled { border-color: #e5bdce; background: #e5bdce; cursor: not-allowed; }
-.restart-overlay { position: fixed; inset: 0; z-index: 4000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: rgba(250, 251, 253, 0.97); text-align: center; }
-.restart-overlay > i { color: #c74e80; font-size: 42px; }
-.restart-overlay p { color: #747984; }
-.restart-addresses { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
-.restart-addresses a { color: #b63d70; }
 ::v-deep .el-button--primary { border-color: #cf588a; background: #cf588a; }
 ::v-deep .el-input-number { width: 100%; }
 

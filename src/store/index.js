@@ -8,10 +8,20 @@ import chatWebSocket from "@/utils/websocket/chat-websocket"
 Vue.use(Vuex)
 
 export default new Vuex.Store({
-  plugins: [createPersistedState()],
+  plugins: [
+    createPersistedState({
+      reducer: (state) => {
+        return {
+          botType: state.botType,
+          selectedBotKey: state.selectedBotKey,
+        }
+      },
+    }),
+  ],
   state: {
     botType: null,
     botInfo: null,
+    selectedBotKey: null,
     chatObj: {}, // 聊天ws信息存储
     _chatId: null,
     wsStatusData: null,
@@ -20,6 +30,15 @@ export default new Vuex.Store({
       memoryList: [],
       diskList: [],
       timeList: [],
+    },
+    pluginOperation: {
+      visible: false,
+      active: false,
+      status: "idle",
+      action: "",
+      pluginName: "",
+      title: "",
+      message: "",
     },
   },
   getters: {
@@ -36,6 +55,39 @@ export default new Vuex.Store({
     },
     SET_BOT(state, botInfo) {
       state.botInfo = botInfo
+      if (botInfo && botInfo.bot_key) state.selectedBotKey = botInfo.bot_key
+    },
+    START_PLUGIN_OPERATION(state, payload) {
+      state.pluginOperation = {
+        visible: true,
+        active: true,
+        status: "running",
+        action: payload.action,
+        pluginName: payload.pluginName,
+        title: payload.title,
+        message: payload.message,
+      }
+    },
+    FINISH_PLUGIN_OPERATION(state, payload) {
+      state.pluginOperation = {
+        ...state.pluginOperation,
+        visible: true,
+        active: false,
+        status: payload.status,
+        title: payload.title,
+        message: payload.message,
+      }
+    },
+    CLEAR_PLUGIN_OPERATION(state) {
+      state.pluginOperation = {
+        visible: false,
+        active: false,
+        status: "idle",
+        action: "",
+        pluginName: "",
+        title: "",
+        message: "",
+      }
     },
     SET_CHAT_ID(state, chatId) {
       state._chatId = chatId
