@@ -151,22 +151,33 @@
               />
             </button>
 
-            <!-- API地址设置按钮 -->
-            <router-link
-              :to="{ name: 'MyApi' }"
-              class="hidden md:flex items-center px-4 py-2 rounded-full transition-all duration-300 shadow-sm"
-              :style="{
-                background: `linear-gradient(to right, var(--primary-color-light-9), var(--primary-color-light-8))`,
-                color: 'var(--primary-color)',
-              }"
-            >
-              <svg-icon icon-class="server" class="w-5 h-5 mr-2" />
-              <span>地址设置</span>
-            </router-link>
+            <el-autocomplete
+              v-model="menuSearch"
+              class="global-search hidden sm:block"
+              value-key="name"
+              prefix-icon="el-icon-search"
+              placeholder="搜索页面"
+              :fetch-suggestions="queryMenuSearch"
+              @select="selectSearchResult"
+            />
+            <el-tooltip content="高级地址设置" placement="bottom">
+              <router-link
+                :to="{ name: 'MyApi' }"
+                class="address-shortcut hidden md:grid"
+                aria-label="高级地址设置"
+              >
+                <svg-icon icon-class="server" class="w-5 h-5" />
+              </router-link>
+            </el-tooltip>
           </div>
 
           <!-- 右侧功能区 -->
           <div class="flex items-center space-x-4">
+            <el-tooltip :content="socketSummary.detail" placement="bottom">
+              <span class="socket-status" :class="`is-${socketSummary.status}`">
+                <i></i><span class="hidden lg:inline">{{ socketSummary.label }}</span>
+              </span>
+            </el-tooltip>
             <!-- 主题切换 -->
             <el-dropdown
               @command="handleThemeChange"
@@ -283,6 +294,18 @@
                 class="shadow-lg rounded-xl overflow-hidden transition-all duration-300"
               >
                 <el-dropdown-item
+                  command="account-security"
+                  class="flex items-center px-4 py-2 transition-all duration-200"
+                  :style="{ backgroundColor: 'var(--bg-color-hover)' }"
+                >
+                  <i
+                    class="el-icon-lock mr-2"
+                    :style="{ color: 'var(--primary-color)' }"
+                  ></i>
+                  <span :style="{ color: 'var(--text-color)' }">账户安全</span>
+                </el-dropdown-item>
+                <el-dropdown-item
+                  divided
                   command="logout"
                   class="flex items-center px-4 py-2 transition-all duration-200"
                   :style="{ backgroundColor: 'var(--bg-color-hover)' }"
@@ -320,16 +343,26 @@
         </main>
       </div>
     </div>
+    <account-security-dialog
+      :visible.sync="accountSecurityVisible"
+      @password-reset="finishLogout"
+    />
   </div>
 </template>
 
 <script>
+import AccountSecurityDialog from "@/components/account/AccountSecurityDialog"
 import EventBus from "@/utils/event-bus"
+import { clearCookie } from "@/utils/api"
 import { getHeaderHeight } from "@/utils/utils"
 export default {
   name: "MainHome",
+  components: { AccountSecurityDialog },
   data() {
     return {
+      accountSecurityVisible: false,
+      menuSearch: "",
+      socketStates: { status: "connecting", log: "idle", chat: "idle" },
       asideShow: false, // 默认隐藏菜单栏，移动端会覆盖这个值
       isCollapsed: false,
       isMobile: false,
@@ -380,6 +413,16 @@ export default {
     computedHeight() {
       return this.windowHeight - getHeaderHeight() + 7
     },
+    socketSummary() {
+      const state = this.socketStates.status
+      if (state === "connected") {
+        return { status: "ok", label: "实时通道正常", detail: "WebUI状态通道已连接" }
+      }
+      if (state === "reconnecting") {
+        return { status: "warning", label: "正在重连", detail: "状态通道断开，正在自动重连" }
+      }
+      return { status: "warning", label: "正在连接", detail: "正在建立WebUI状态通道" }
+    },
   },
   created() {
     this.getBotInfo()
@@ -388,19 +431,56 @@ export default {
     this.getMenus()
     this.$store.dispatch("initStatusSocket")
     window.addEventListener("resize", this.handleResize)
+    window.addEventListener("zhenxun-websocket-state", this.handleSocketState)
     this.checkScreenSize()
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.handleResize)
+    window.removeEventListener("zhenxun-websocket-state", this.handleSocketState)
   },
   inject: ["setAppTheme"],
   methods: {
-    dropdownClick(cmd) {
-      if (cmd == "logout") {
-        window.sessionStorage.removeItem("isAuthenticated") // 清除登录状态
-        this.$message.success("已退出登录！")
-        this.$router.push("/")
+    handleSocketState(event) {
+      const channel = event.detail?.channel
+      if (channel && Object.prototype.hasOwnProperty.call(this.socketStates, channel)) {
+        this.$set(this.socketStates, channel, event.detail.status)
       }
+    },
+    queryMenuSearch(query, callback) {
+      const keyword = String(query || "").trim().toLowerCase()
+      const results = keyword
+        ? this.menus.filter((menu) =>
+            `${menu.name} ${menu.module}`.toLowerCase().includes(keyword)
+          )
+        : this.menus
+      callback(results.map((menu) => ({ ...menu, value: menu.name })))
+    },
+    selectSearchResult(menu) {
+      this.menuSearch = ""
+      this.handleSelect(menu.router)
+    },
+    dropdownClick(cmd) {
+      if (cmd === "account-security") {
+        this.accountSecurityVisible = true
+      } else if (cmd === "logout") {
+        this.finishLogout(true)
+      }
+    },
+    closeSockets() {
+      this.$statusWebSocket.closeWebSocket()
+      this.$logWebSocket.closeWebSocket()
+      this.$chatWebSocket.closeWebSocket()
+    },
+    finishLogout(showMessage = false) {
+      this.closeSockets()
+      clearCookie("tokenStr")
+      window.sessionStorage.removeItem("isAuthenticated")
+      window.sessionStorage.removeItem("zhenxunSetupToken")
+      window.sessionStorage.removeItem("zhenxunSetupRestartReceipt")
+      if (showMessage === true) {
+        this.$message.success("已退出登录！")
+      }
+      this.$router.replace("/")
     },
     getMenuWidth() {
       if (this.isCollapsed) {
@@ -477,7 +557,6 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.menus = resp.data.menus
             this.$store.commit("SET_BOT_TYPE", resp.data.bot_type)
             if (this.$route.path == "/") {
@@ -508,8 +587,7 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
-            this.botList = resp.data
+            this.botList = resp.data || []
             if (!this.botList.length) {
               this.$store.state.botInfo = null
             } else {
@@ -589,6 +667,48 @@ export default {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--primary-color-light-5);
+}
+
+.global-search {
+  width: min(28vw, 330px);
+}
+
+::v-deep .global-search .el-input__inner {
+  height: 38px;
+  border-color: var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-color);
+  color: var(--text-color);
+}
+
+.address-shortcut {
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--primary-color);
+  background: var(--bg-color);
+}
+
+.socket-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-color-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.socket-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-warning);
+}
+
+.socket-status.is-ok i {
+  background: var(--el-color-success);
 }
 
 /* 缓慢弹跳动画 */

@@ -1,5 +1,13 @@
 import { getBaseUrl, getCookie } from "@/utils/api"
 
+export const emitWebSocketState = (channel, status) => {
+  window.dispatchEvent(
+    new CustomEvent("zhenxun-websocket-state", {
+      detail: { channel, status },
+    })
+  )
+}
+
 export const createAuthenticatedWebSocket = (path) => {
   const url = new URL(getBaseUrl())
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"

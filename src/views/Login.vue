@@ -49,7 +49,7 @@
         <!-- Logo 头像 - 添加了加载动画 -->
         <div class="flex justify-center mb-8">
           <img
-            src="@/assets/image/logo.png"
+            :src="logoUrl"
             alt="Logo"
             class="w-100 h-50 object-contain transition-all duration-500 hover:scale-110 hover:rotate-3"
             :class="{ 'animate-pulse': loading }"
@@ -190,6 +190,7 @@
 
 <script>
 import qs from "qs"
+import logoUrl from "@/assets/image/logo.png"
 import { setCookie, clearCookie, getCookie } from "@/utils/api"
 import CuteConfirm from "@/components/ui/CuteConfirm"
 import InteractiveInput from "@/components/ui/NeonInput.vue"
@@ -214,6 +215,7 @@ export default {
       }
     }
     return {
+      logoUrl,
       loginForm: {
         username: "",
         password: "",

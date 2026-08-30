@@ -4,7 +4,6 @@ import router from "./router"
 import store from "./store"
 import ElementUI from "element-ui"
 import "element-ui/lib/theme-chalk/index.css"
-import * as echarts from "echarts"
 import "default-passive-events"
 import "./assets/icons/index"
 import "./assets/css/global.css"
@@ -32,7 +31,11 @@ Vue.prototype.putRequest = putRequest
 Vue.prototype.getRequest = getRequest
 Vue.prototype.deleteRequest = deleteRequest
 Vue.prototype.getBaseUrl = getBaseUrl
-Vue.prototype.$echarts = echarts
+let echartsLoader = null
+Vue.prototype.$loadEcharts = () => {
+  if (!echartsLoader) echartsLoader = import("echarts")
+  return echartsLoader
+}
 Vue.prototype.$message = message
 Vue.prototype.$notify = notify
 Vue.prototype.getLoading = loading

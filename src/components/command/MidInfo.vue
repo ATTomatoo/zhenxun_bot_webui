@@ -353,19 +353,19 @@ export default {
   created() {
     this.botInfo = this.$store.state.botInfo || {}
   },
-  mounted() {
+  async mounted() {
     window.addEventListener("resize", this.handleResize)
+    const echarts = await this.$loadEcharts()
+    this.chart = echarts.init(this.$refs.chart)
     this.getChCount(this.botInfo.self_id)
     this.getCallCount(this.botInfo.self_id)
     this.getMonthChatAndCallCount(this.botInfo.self_id)
     this.chatCntInterval = setInterval(() => {
       this.getChCount(this.botInfo.self_id, true)
     }, 30000)
-    this.chart = this.$echarts.init(this.$refs.chart)
     this.callInterval = setInterval(() => {
       this.getCallCount(this.botInfo.self_id, true)
     }, 30000)
-    this.chart = this.$echarts.init(this.$refs.chart)
     this.handleResize()
     this.updateChartTheme()
     EventBus.$on("sidebar-aside", debounce(this.handleResize, 200))

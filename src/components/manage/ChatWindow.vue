@@ -12,7 +12,7 @@
       class="flex-1 flex flex-col items-center justify-center p-6"
     >
       <img
-        src="@/assets/image/empty1.png"
+        :src="emptyChatUrl"
         class="w-64 h-64 object-contain mb-4"
         alt="等待聊天开始"
       />
@@ -193,6 +193,7 @@
 
 <script>
 import { debounce } from "lodash"
+import emptyChatUrl from "@/assets/image/empty1.png"
 import MyButton from "../ui/MyButton.vue"
 
 export default {
@@ -200,6 +201,7 @@ export default {
   components: { MyButton },
   data() {
     return {
+      emptyChatUrl,
       message: "",
       isStartChat: false,
       chatInfo: {},

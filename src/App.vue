@@ -27,7 +27,7 @@ export default {
   },
   mounted() {
     window.addEventListener("resize", this.handleResize)
-    const savedTheme = localStorage.getItem("app-theme") || "default"
+    const savedTheme = localStorage.getItem("app-theme") || "light"
     this.setTheme(savedTheme)
   },
   methods: {

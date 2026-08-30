@@ -1,10 +1,13 @@
 // import router from "@/router/routers" //引入router, 作页面跳转
 // import store from "@/store" //引入store, 作聊天消息存储
-import vue from "@/main"
-import { createAuthenticatedWebSocket } from "./create-websocket"
+import {
+  createAuthenticatedWebSocket,
+  emitWebSocketState,
+} from "./create-websocket"
 
 var ws = null
 var heartbeatInterval = null
+var reconnectTimer = null
 var reconnectEnabled = true
 
 function startHeartbeat() {
@@ -17,8 +20,18 @@ function startHeartbeat() {
 
 function stopHeartbeat() {
   if (heartbeatInterval) {
-    clearInterval(heartbeatInterval) // 停止心跳检测定时器
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
   }
+}
+
+function scheduleReconnect(onMessage, context) {
+  if (!reconnectEnabled || reconnectTimer) return
+  emitWebSocketState("log", "reconnecting")
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (reconnectEnabled) context.initWebSocket(onMessage)
+  }, 3000)
 }
 export default {
   ws: null,
@@ -26,6 +39,7 @@ export default {
   initWebSocket: function (onMessage) {
     reconnectEnabled = true
     if (!ws) {
+      emitWebSocketState("log", "connecting")
       console.log("LOG_WS_URL WebSocket 正在连接...")
       const websocket = createAuthenticatedWebSocket("/zhenxun/socket/logs")
       ws = websocket
@@ -33,6 +47,7 @@ export default {
       startHeartbeat()
       websocket.onopen = () => {
         console.log("LOG_WS_URL WebSocket 已连接...")
+        emitWebSocketState("log", "connected")
       }
       websocket.onmessage = onMessage
       websocket.onclose = () => {
@@ -40,11 +55,9 @@ export default {
           ws = null
           this.ws = null
         }
-        vue.$message.warning("LOG_WS_URL WebSocket 已断开...")
         stopHeartbeat()
-        if (reconnectEnabled) {
-          setTimeout(() => this.initWebSocket(onMessage), 3000)
-        }
+        if (reconnectEnabled) scheduleReconnect(onMessage, this)
+        else emitWebSocketState("log", "idle")
       }
     } else {
       ws.onmessage = onMessage
@@ -54,6 +67,12 @@ export default {
   closeWebSocket: function () {
     console.log("关闭ws")
     reconnectEnabled = false
+    emitWebSocketState("log", "idle")
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    stopHeartbeat()
     if (ws && ws.readyState <= WebSocket.OPEN) {
       ws.close()
     }

@@ -1,7 +1,8 @@
 <template>
   <el-dialog
     :visible.sync="visible"
-    @close="close"
+    :before-close="confirmClose"
+    @closed="handleClosed"
     :class="{
       'neko-dialog': true,
       'limit-width': !updateData.config_list || !updateData.config_list.length,
@@ -237,6 +238,7 @@
 
 <script>
 import AutoComponent from "./AutoComponent.vue"
+import { clearDirtyState, setDirtyState } from "@/utils/dirty-state"
 import NeonInput from "@/components/ui/NeonInput.vue"
 import NekoSelect from "@/components/ui/NekoSelect.vue"
 import MySwitch from "@/components/ui/MySwitch.vue"
@@ -291,6 +293,8 @@ export default {
         block_type: null,
         config_list: [],
       },
+      initialData: "",
+      dirtySource: `plugin-config-${this._uid}`,
       rules: {
         cost_gold: [{ validator: checkCostGold, trigger: "blur" }],
       },
@@ -300,8 +304,56 @@ export default {
     this.getPluginDetail()
     this.getPluginMenuType()
   },
+  beforeDestroy() {
+    clearDirtyState(this.dirtySource)
+  },
+  watch: {
+    updateData: {
+      deep: true,
+      handler(value) {
+        setDirtyState(
+          this.dirtySource,
+          Boolean(this.initialData) && JSON.stringify(value) !== this.initialData
+        )
+      },
+    },
+  },
   methods: {
-    close() {
+    async close() {
+      if (!(await this.confirmDiscard())) return
+      clearDirtyState(this.dirtySource)
+      this.$emit("close")
+    },
+    async confirmDiscard() {
+      if (
+        !this.initialData ||
+        JSON.stringify(this.updateData) === this.initialData
+      ) {
+        return true
+      }
+      try {
+        await this.$confirm(
+          "插件配置尚未保存，确定放弃修改吗？",
+          "关闭配置",
+          {
+            confirmButtonText: "放弃修改",
+            cancelButtonText: "继续编辑",
+            type: "warning",
+          }
+        )
+        return true
+      } catch (error) {
+        return false
+      }
+    },
+    async confirmClose(done) {
+      if (await this.confirmDiscard()) {
+        clearDirtyState(this.dirtySource)
+        done()
+      }
+    },
+    handleClosed() {
+      clearDirtyState(this.dirtySource)
       this.$emit("close")
     },
     getPluginDetail() {
@@ -313,8 +365,9 @@ export default {
           if (resp.warning) {
             this.$message.warning(resp.warning)
           } else {
-            this.$message.success(resp.info)
             this.updateData = resp.data
+            this.initialData = JSON.stringify(resp.data)
+            clearDirtyState(this.dirtySource)
             if (!resp.data.config_list || !resp.data.config_list.length) {
               this.dialogWidth = "700px"
             }
@@ -392,6 +445,8 @@ export default {
                 this.$message.warning(resp.warning)
               } else {
                 this.$message.success(resp.info)
+                this.initialData = JSON.stringify(this.updateData)
+                clearDirtyState(this.dirtySource)
                 this.$emit("close", true)
               }
             } else {

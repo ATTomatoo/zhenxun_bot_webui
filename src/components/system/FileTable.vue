@@ -521,7 +521,10 @@ export default {
         false,
         /\.svg$/
       )
-      const requireAll = (requireContext) => requireContext.keys()
+      const requireAll = (requireContext) => {
+        requireContext.keys().forEach(requireContext)
+        return requireContext.keys()
+      }
       const re = /\.\/(.*)\.svg/
       this.vscodeIcons = requireAll(req).map((i) => i.match(re)[1])
     },

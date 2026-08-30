@@ -224,8 +224,8 @@ export default {
       this.botConfig = this.botInfo.config || {}
     }
   },
-  mounted() {
-    this.initCharts()
+  async mounted() {
+    await this.initCharts()
     this.setupResizeListener()
     this.startTimers()
     EventBus.$on("sidebar-aside", debounce(this.handleResize, 200))
@@ -238,9 +238,10 @@ export default {
     EventBus.$off("change-theme", this.updateChartTheme)
   },
   methods: {
-    initCharts() {
-      this.groupChart = this.$echarts.init(this.$refs.groupChart)
-      this.hotPluginChart = this.$echarts.init(this.$refs.hotPluginChart)
+    async initCharts() {
+      const echarts = await this.$loadEcharts()
+      this.groupChart = echarts.init(this.$refs.groupChart)
+      this.hotPluginChart = echarts.init(this.$refs.hotPluginChart)
       this.getActiveGroupData()
       this.getHotPlugin()
     },
