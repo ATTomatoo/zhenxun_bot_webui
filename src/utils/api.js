@@ -49,7 +49,9 @@ axios.interceptors.response.use(
           router.replace("/")
         }
       } else {
-        if (data && data.detail && data.detail.length) {
+        if (data && typeof data.detail === "string") {
+          Message.error({ message: data.detail })
+        } else if (data && Array.isArray(data.detail) && data.detail.length) {
           Message.error({ message: data.detail[0].msg })
         } else {
           Message.error({ message: "发生错误啦!" })
@@ -60,27 +62,28 @@ axios.interceptors.response.use(
         Message.error({
           message: "网络连接好像不通畅哦，请检查服务器与地址设置...",
         })
-        return
+        return Promise.reject(error)
       }
     }
-
-    return
+    return Promise.reject(error)
   }
 )
 
-export const getBrowserBaseApiUrl = () => {
-  const protocol = ["http:", "https:"].includes(window.location.protocol)
-    ? window.location.protocol
-    : "http:"
-  return `${protocol}//${window.location.hostname || "localhost"}`
+const pageUrl = new URL(window.location.origin)
+const formatHostname = (hostname) => {
+  const normalized = String(hostname || "localhost").replace(/^\[|\]$/g, "")
+  return normalized.includes(":") ? `[${normalized}]` : normalized
 }
+const pageHostname = formatHostname(pageUrl.hostname)
+const pageBaseUrl = `${pageUrl.protocol}//${pageHostname}`
+const pagePort =
+  pageUrl.port || (pageUrl.protocol === "https:" ? "443" : "80")
 
-export const getBrowserPort = () => {
-  if (window.location.port) return window.location.port
-  return window.location.protocol === "https:" ? "443" : "80"
-}
+let baseApiUrl = pageBaseUrl
 
-let baseApiUrl = getBrowserBaseApiUrl()
+export const getBrowserBaseApiUrl = () => pageBaseUrl
+
+export const getBrowserPort = () => pagePort
 
 export const getBaseUrl = () => {
   return getBaseApiUrl() + ":" + getPort()
@@ -91,20 +94,32 @@ export const setPort = (port) => {
 }
 
 export const getPort = () => {
-  return localStorage.getItem("port") || "8080"
+  return localStorage.getItem("port") || pagePort
 }
 
 export const setBaseApiUrl = (url) => {
-  if (url[url.length - 1] == "/" || url[url.length - 1] == "\\") {
-    url = url.slice(0, -1)
+  let normalized = String(url || "").trim()
+  if (
+    normalized[normalized.length - 1] == "/" ||
+    normalized[normalized.length - 1] == "\\"
+  ) {
+    normalized = normalized.slice(0, -1)
   }
-  if (url != "") {
-    baseApiUrl = url
+  if (normalized != "") {
+    const value = normalized.includes("://")
+      ? normalized
+      : `http://${normalized}`
+    const parsed = new URL(value)
+    const hostname = formatHostname(parsed.hostname)
+    baseApiUrl = `${parsed.protocol}//${hostname}`
+    if (parsed.port) {
+      setPort(parsed.port)
+    }
     setBaseUrlLocalStorage(baseApiUrl)
   } else {
-    baseApiUrl = getBrowserBaseApiUrl()
+    baseApiUrl = pageBaseUrl
     setBaseUrlLocalStorage(baseApiUrl)
-    setPort(getBrowserPort())
+    setPort(pagePort)
   }
 }
 
@@ -118,11 +133,12 @@ export const getBaseApiUrl = () => {
 }
 
 //传送json格式的post请求
-export const postRequest = (url, params) => {
+export const postRequest = (url, params, config = {}) => {
   if (!url.startsWith("http")) {
     url = `${getBaseUrl()}${url}`
   }
   return axios({
+    ...config,
     method: "post",
     url: url,
     data: params,
@@ -140,7 +156,7 @@ export const putRequest = (url, params) => {
   })
 }
 //传递json的get请求
-export const getRequest = (url, params) => {
+export const getRequest = (url, params, config = {}) => {
   if (params && Object.keys(params).length) {
     url += "?"
     Object.keys(params).forEach((e) => {
@@ -160,6 +176,7 @@ export const getRequest = (url, params) => {
     url = `${getBaseUrl()}${url}`
   }
   return axios({
+    ...config,
     method: "get",
     url: url,
     data: params,
@@ -183,7 +200,20 @@ export const setBaseUrlLocalStorage = (value) => {
 }
 //取出localStorage
 export const getBaseUrlLocalStorage = () => {
-  return localStorage.getItem("baseUrl")
+  const savedUrl = localStorage.getItem("baseUrl")
+  const savedPort = localStorage.getItem("port")
+  const pageIsLocal = ["localhost", "127.0.0.1", "::1"].includes(
+    pageUrl.hostname
+  )
+  const isLegacyDefault =
+    ["http://localhost", "http://127.0.0.1"].includes(savedUrl) &&
+    (!savedPort || savedPort === "8080")
+  if (isLegacyDefault && !pageIsLocal) {
+    localStorage.removeItem("baseUrl")
+    localStorage.removeItem("port")
+    return null
+  }
+  return savedUrl
 }
 
 //设置cookie方法

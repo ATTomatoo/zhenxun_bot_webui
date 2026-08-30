@@ -48,13 +48,13 @@
           <span class="platform-icon qq">QQ</span>
           <span class="platform-content">
             <strong>QQ 官方机器人</strong>
-            <small>QQ 开放平台 · WebSocket</small>
+            <small>QQ 开放平台 · HTTPS Webhook</small>
           </span>
           <el-tag
             size="mini"
             :type="status.qq_official_connected ? 'success' : 'info'"
           >
-            {{ status.qq_official_connected ? "已连接" : "未连接" }}
+            {{ qqOfficialStatusLabel }}
           </el-tag>
         </button>
       </div>
@@ -131,11 +131,11 @@
         <div>
           <el-tag type="info" effect="plain">官方接入</el-tag>
           <h2>配置 QQ 官方机器人</h2>
-          <p>由真寻主动连接 QQ 开放平台，不需要在协议端填写本机 WebSocket URL。</p>
+          <p>QQ 开放平台通过签名 HTTPS Webhook 将事件推送给真寻。</p>
         </div>
         <div class="direction-badge">
           <i class="el-icon-connection"></i>
-          真寻 → QQ 开放平台
+          QQ 开放平台 → 真寻
         </div>
       </div>
 
@@ -153,15 +153,18 @@
             <strong>填写 Bot 环境配置</strong>
             <p>
               将 <code>QQ_ADAPTER_LOAD</code> 设为 <code>True</code>，并在
-              <code>QQ_BOTS</code> 中填写机器人凭据。
+              <code>QQ_BOTS</code> 中填写机器人凭据；连接模式可选择自行反代或内置 HTTPS。
             </p>
           </div>
         </div>
         <div class="step-item">
           <span class="step-number">3</span>
           <div>
-            <strong>重启真寻</strong>
-            <p>配置会在重启后生效，之后可在下方等待连接结果。</p>
+            <strong>配置回调并重启</strong>
+            <p>
+              在开放平台填写公网 HTTPS 地址，路径固定为
+              <code>{{ status.qq_webhook_path }}</code>，配置在重启后生效。
+            </p>
           </div>
         </div>
       </div>
@@ -169,15 +172,15 @@
       <div class="connection-summary">
         <div>
           <span>连接方式</span>
-          <strong>官方 WebSocket</strong>
+          <strong>签名 HTTPS Webhook</strong>
         </div>
         <div>
-          <span>连接方向</span>
-          <strong>Bot 主动连接平台</strong>
+          <span>部署模式</span>
+          <strong>{{ qqWebhookModeLabel }}</strong>
         </div>
         <div>
-          <span>连接地址</span>
-          <strong>由适配器自动获取</strong>
+          <span>回调路径</span>
+          <strong>{{ status.qq_webhook_path }}</strong>
         </div>
       </div>
     </section>
@@ -217,6 +220,7 @@
           type="primary"
           icon="el-icon-search"
           :loading="statusLoading"
+          :disabled="!canWaitForSelectedPlatform"
           @click="startWaiting"
         >
           {{ waitingState === "connected" ? "重新检测" : "等待协议端连接" }}
@@ -234,9 +238,12 @@ export default {
       selectedPlatform: "onebot_v11",
       status: {
         onebot_v11_connected: false,
+        qq_official_enabled: false,
         qq_official_connected: false,
+        qq_webhook_mode: "external",
         connections: [],
         onebot_v11_reverse_ws_path: "/onebot/v11/ws",
+        qq_webhook_path: "/qq/webhook",
       },
       statusLoading: false,
       waiting: false,
@@ -260,10 +267,23 @@ export default {
         : this.status.qq_official_connected
     },
     connectedBots() {
-      const adapterName =
-        this.selectedPlatform === "onebot_v11" ? "OneBot V11" : "QQ"
       return this.status.connections.filter(
-        (connection) => connection.adapter === adapterName
+        (connection) => connection.platform === this.selectedPlatform
+      )
+    },
+    qqOfficialStatusLabel() {
+      if (this.status.qq_official_connected) return "已连接"
+      return this.status.qq_official_enabled ? "等待事件" : "未启用"
+    },
+    qqWebhookModeLabel() {
+      return this.status.qq_webhook_mode === "builtin_https"
+        ? "内置 HTTPS"
+        : "自行 HTTPS 反代"
+    },
+    canWaitForSelectedPlatform() {
+      return (
+        this.selectedPlatform !== "qq_official" ||
+        this.status.qq_official_enabled
       )
     },
     selectedPlatformName() {
@@ -281,6 +301,9 @@ export default {
       if (this.waitingState === "timeout") {
         return "暂未检测到连接"
       }
+      if (!this.canWaitForSelectedPlatform) {
+        return "QQ 官方适配器未启用"
+      }
       return "等待协议端连接"
     },
     waitingDescription() {
@@ -292,6 +315,9 @@ export default {
       }
       if (this.waitingState === "timeout") {
         return "本次等待已结束，你可以检查协议端配置后重新检测；未连接不会限制其他功能。"
+      }
+      if (!this.canWaitForSelectedPlatform) {
+        return "请完成 QQ_ADAPTER_LOAD、QQ_BOTS 和 Webhook 模式配置后重启真寻。"
       }
       return "配置完成后点击按钮，页面会等待最多 60 秒；未连接也不会强制阻止后续操作。"
     },
@@ -332,6 +358,7 @@ export default {
       return false
     },
     async startWaiting() {
+      if (!this.canWaitForSelectedPlatform) return
       this.clearPollingTimer()
       this.waiting = true
       this.waitingState = "waiting"

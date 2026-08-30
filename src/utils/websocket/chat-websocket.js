@@ -1,10 +1,11 @@
 // import router from "@/router/routers" //引入router, 作页面跳转
 // import store from "@/store" //引入store, 作聊天消息存储
-import { getBaseUrl, getPort } from "@/utils/api"
 import vue from "@/main"
+import { createAuthenticatedWebSocket } from "./create-websocket"
 
 var ws = null
 var heartbeatInterval = null
+var reconnectEnabled = true
 
 function startHeartbeat() {
   heartbeatInterval = setInterval(() => {
@@ -96,31 +97,35 @@ export default {
   },
   //初始化ws
   initWebSocket: function () {
+    reconnectEnabled = true
     if (!ws) {
-      const baseUrlSplit = getBaseUrl().split("//")
-      const baseUrl = baseUrlSplit[1]
-      const CHAT_WS_URL = `ws://${baseUrl}/zhenxun/socket/chat` // 日志ws
-      const websocket = new WebSocket(CHAT_WS_URL)
+      const websocket = createAuthenticatedWebSocket("/zhenxun/socket/chat")
+      ws = websocket
+      this.ws = websocket
       startHeartbeat()
       websocket.onopen = () => {
         console.log("CHAT WebSocket 已连接...")
       }
       websocket.onmessage = chatWebsocketOnmessage
       websocket.onclose = () => {
+        if (ws === websocket) {
+          ws = null
+          this.ws = null
+        }
         vue.$message.warning("CHAT WebSocket 已断开...")
         stopHeartbeat()
-        setTimeout(() => {
-          this.initWebSocket()
-        }, 3000)
+        if (reconnectEnabled) {
+          setTimeout(() => this.initWebSocket(), 3000)
+        }
       }
-      ws = websocket
     }
   },
   //断开socked方法
   closeWebSocket: function () {
     console.log("关闭ws")
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.close()
+    reconnectEnabled = false
+    if (ws && ws.readyState <= WebSocket.OPEN) {
+      ws.close()
     }
   },
 }

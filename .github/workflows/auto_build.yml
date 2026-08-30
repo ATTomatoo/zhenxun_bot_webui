@@ -38,5 +38,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: dist
-          repository: ATTomatoo/zhenxun_bot_webui
           force: true
