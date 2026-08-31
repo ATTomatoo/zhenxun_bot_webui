@@ -32,10 +32,10 @@ const uniqueTargets = (values) => {
 }
 
 const choosePreferredOrigin = ({ policy, preferredUrl, targets, currentOrigin }) => {
-  const explicit = normalizeBaseUrl(preferredUrl)
-  if (explicit) return explicit
   const current = normalizeBaseUrl(currentOrigin)
   if (policy === "preserve" && current) return current
+  const explicit = normalizeBaseUrl(preferredUrl)
+  if (explicit) return explicit
   const wantedKind = policy === "local" ? "local" : policy === "network" ? "network" : null
   if (wantedKind) {
     const matched = targets.find((target) => {
@@ -54,10 +54,14 @@ export const restartRecoveryState = () => {
   try {
     const value = JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) || "null")
     if (!value || !value.bootId || !Array.isArray(value.accessUrls)) return null
+    const policy = value.policy || (value.setup ? "legacy-setup" : "preserve")
     const preferredOrigin =
-      normalizeBaseUrl(value.preferredOrigin) || normalizeBaseUrl(value.accessUrls[0])
+      policy === "preserve"
+        ? normalizeBaseUrl(window.location.origin)
+        : normalizeBaseUrl(value.preferredOrigin) || normalizeBaseUrl(value.accessUrls[0])
     return {
       ...value,
+      policy,
       preferredOrigin,
       fallbackUrls: Array.isArray(value.fallbackUrls)
         ? uniqueTargets(value.fallbackUrls)
