@@ -8,6 +8,8 @@ export const apiErrorDetail = (error, fallback) => {
       const facts = []
       if (detail.code) facts.push(`真寻错误码：${detail.code}`)
       if (detail.provider_code) facts.push(`QQ错误码：${detail.provider_code}`)
+      if (detail.provider_explanation) facts.push(detail.provider_explanation)
+      if (detail.suggestion) facts.push(`处理建议：${detail.suggestion}`)
       if (detail.http_status) facts.push(`HTTP：${detail.http_status}`)
       if (detail.trace_id) facts.push(`Trace ID：${detail.trace_id}`)
       return [detail.message, ...facts].join("\n")

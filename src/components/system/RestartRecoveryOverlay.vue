@@ -51,7 +51,12 @@ export default {
         await wait(1500)
         const preferred = this.state.preferredOrigin || this.state.accessUrls[0]
         const fallback = this.state.fallbackUrls || []
-        const candidates = attempt < 8 ? [preferred] : [preferred, ...fallback]
+        const candidates =
+          this.state.policy === "preserve"
+            ? [preferred]
+            : attempt < 8
+            ? [preferred]
+            : [preferred, ...fallback]
         for (const baseUrl of candidates.filter(Boolean)) {
           try {
             const response = await fetch(`${baseUrl}/zhenxun/api/configure/status`, { cache: "no-store" })

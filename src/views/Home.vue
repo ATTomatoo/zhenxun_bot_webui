@@ -240,10 +240,12 @@
               <div class="bot-switch flex items-center cursor-pointer group">
                 <span class="mr-2" :style="{ color: 'var(--text-color)' }">切换账号</span>
                 <el-image
-                  :src="botInfo.ava_url || ''"
+                  :src="botInfo.ava_url || logoUrl"
                   class="w-10 h-10 rounded-full object-cover border-2 shadow-sm"
                   :style="{ borderColor: 'var(--primary-color)' }"
-                />
+                >
+                  <img slot="error" class="w-full h-full object-cover" :src="logoUrl" alt="当前机器人头像" />
+                </el-image>
                 <i class="el-icon-arrow-down ml-2"></i>
               </div>
               <el-dropdown-menu slot="dropdown" class="bot-switch-menu">
@@ -255,10 +257,12 @@
                   class="bot-switch-item"
                 >
                   <el-image
-                    :src="bot.ava_url"
+                    :src="bot.ava_url || logoUrl"
                     class="w-9 h-9 rounded-full object-cover border-2"
                     :style="{ borderColor: 'var(--primary-color-light)' }"
-                  />
+                  >
+                    <img slot="error" class="w-full h-full object-cover" :src="logoUrl" alt="机器人头像" />
+                  </el-image>
                   <div class="bot-switch-copy">
                     <strong>{{ bot.nickname }}</strong>
                     <span>{{ bot.runtime_bot_id }} · {{ bot.platform === "qq_official" ? "QQ_Official" : "OneBot V11" }}</span>

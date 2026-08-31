@@ -1,9 +1,9 @@
 <template>
-  <section class="store-shell">
+  <section class="store-shell" :class="{ 'is-embedded': embedded }">
     <header class="store-header">
       <div>
-        <h1>插件商店</h1>
-        <p>浏览、安装和维护真寻插件</p>
+        <h1>{{ capability === "ai_chat" ? "AI 聊天插件" : "插件商店" }}</h1>
+        <p>{{ capability === "ai_chat" ? "选择并安装适合当前机器人的对话插件" : "浏览、安装和维护真寻插件" }}</p>
       </div>
       <el-button icon="el-icon-refresh" :loading="loading" @click="loadPlugins">刷新</el-button>
     </header>
@@ -110,15 +110,20 @@
 <script>
 export default {
   name: "StoreTemplate",
+  props: {
+    capability: { type: String, default: "" },
+    embedded: { type: Boolean, default: false },
+  },
   data() {
     return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, actionType: "", drawerVisible: false, selectedPlugin: null }
   },
   computed: {
     pluginOperation() { return this.$store.state.pluginOperation },
-    pluginTypes() { return [...new Set(this.plugins.map((item) => item.plugin_type).filter(Boolean))].sort() },
+    catalogPlugins() { return this.capability ? this.plugins.filter((item) => (item.capabilities || []).includes(this.capability)) : this.plugins },
+    pluginTypes() { return [...new Set(this.catalogPlugins.map((item) => item.plugin_type).filter(Boolean))].sort() },
     filteredPlugins() {
       const keyword = this.search.toLowerCase()
-      const result = this.plugins.filter((plugin) => {
+      const result = this.catalogPlugins.filter((plugin) => {
         const matchesSearch = !keyword || `${plugin.name} ${plugin.module} ${plugin.author}`.toLowerCase().includes(keyword)
         const matchesType = this.typeFilter === "all" || plugin.plugin_type === this.typeFilter
         const matchesStatus = this.statusFilter === "all" || (this.statusFilter === "uninstalled" && !plugin.installed) || (this.statusFilter === "installed" && plugin.installed) || (this.statusFilter === "updatable" && plugin.update_available)
@@ -209,6 +214,8 @@ export default {
 
 <style scoped>
 .store-shell { min-height: 100%; padding: 22px; color: var(--text-color); background: var(--bg-color); }
+.store-shell.is-embedded { padding: 0; background: transparent; }
+.store-shell.is-embedded .store-header h1 { font-size: 18px; }
 .store-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .store-header h1 { margin: 0; font-size: 24px; }.store-header p { margin: 5px 0 0; color: var(--text-color-secondary); }
 .store-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 150px 150px 150px; gap: 10px; margin-bottom: 16px; }

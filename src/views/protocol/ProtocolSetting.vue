@@ -1,7 +1,7 @@
 <template>
   <main class="protocol-page" v-loading="loading">
     <header class="page-heading">
-      <div><p class="eyebrow">BOT CONNECTION</p><h1>机器人接入</h1><p>扫码接入 QQ 官方机器人，或在高级设置中管理其他连接方式。</p></div>
+      <div><p class="eyebrow">BOT CONNECTION</p><h1>机器人接入</h1><p>扫码或手动接入 QQ 官方机器人，并管理 OneBot 连接。</p></div>
       <div class="overall-status" :class="{ online: hasAnyConnection }"><span></span>{{ hasAnyConnection ? "已有机器人在线" : "暂无机器人在线" }}</div>
     </header>
 
@@ -26,7 +26,39 @@
     </section>
 
     <section v-else class="qq-workspace">
-      <div class="scan-panel">
+      <div class="qq-mode-toolbar">
+        <el-radio-group v-model="qqSetupMode" size="small">
+          <el-radio-button label="scan"><i class="el-icon-full-screen"></i> 扫码接入</el-radio-button>
+          <el-radio-button label="manual"><i class="el-icon-edit-outline"></i> 手动接入</el-radio-button>
+        </el-radio-group>
+        <div class="adapter-controls">
+          <span>{{ qqForm.enabled ? "QQ 官方适配器已启用" : "QQ 官方适配器已停用" }}</span>
+          <el-switch v-model="qqForm.enabled" />
+          <el-button size="small" type="primary" :loading="saving" :disabled="!configuration.revision" @click="saveConfiguration">保存状态</el-button>
+        </div>
+      </div>
+
+      <div v-if="configuredBotRows.length" class="connected-list">
+        <div class="section-heading compact"><div><h3>已配置机器人</h3><p>状态、公开身份与QQ官方公共错误诊断。</p></div><el-button size="small" icon="el-icon-refresh" :loading="statusLoading" @click="loadStatus">刷新</el-button></div>
+        <div class="connection-row" v-for="bot in configuredBotRows" :key="bot.app_id">
+          <el-avatar :size="34" :src="bot.avatar_url || logoUrl" icon="el-icon-user-solid" />
+          <span class="connection-identity"><strong>{{ bot.username || bot.app_id }}</strong><small>{{ bot.app_id }}</small></span>
+          <span>QQ_Official · {{ bot.mode === "websocket" ? "WebSocket" : "Webhook" }}</span>
+          <el-tag size="mini" :type="bot.connected ? 'success' : bot.state === 'failed' ? 'danger' : bot.state === 'disabled' ? 'info' : 'warning'">{{ qqStateLabel(bot) }}</el-tag>
+          <el-button type="text" class="danger-text" icon="el-icon-delete" :loading="bot.configured.removing" @click="removeConfiguredBot(bot)">删除</el-button>
+          <div v-if="bot.error" class="connection-error">
+            <strong>{{ bot.error.message }}</strong>
+            <span>真寻错误码：<code>{{ bot.error.code }}</code></span>
+            <span v-if="bot.error.provider_code">QQ错误码：<code>{{ bot.error.provider_code }}</code></span>
+            <span v-if="bot.error.http_status">HTTP：{{ bot.error.http_status }}</span>
+            <span v-if="bot.error.provider_explanation">{{ bot.error.provider_explanation }}</span>
+            <span v-if="bot.error.suggestion">处理建议：{{ bot.error.suggestion }}</span>
+            <el-button v-if="bot.error.trace_id" type="text" size="mini" @click="copyText(bot.error.trace_id)">复制 Trace ID</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="qqSetupMode === 'scan'" class="scan-panel">
         <div class="scan-icon"><i class="el-icon-full-screen"></i></div>
         <div class="scan-copy">
           <el-tag size="mini" type="success" effect="plain">推荐</el-tag>
@@ -37,29 +69,9 @@
         <el-button type="primary" icon="el-icon-full-screen" :loading="registration.starting" @click="startRegistration">扫码接入</el-button>
       </div>
 
-      <div v-if="status.qq_bots.length" class="connected-list">
-        <div class="section-heading compact"><div><h3>机器人连接状态</h3><p>展示当前进程中的连接阶段和QQ官方公共错误码。</p></div><el-button size="small" icon="el-icon-refresh" :loading="statusLoading" @click="loadStatus">刷新</el-button></div>
-        <div class="connection-row" v-for="bot in status.qq_bots" :key="bot.app_id">
-          <el-avatar :size="34" :src="bot.avatar_url || ''" icon="el-icon-user-solid" />
-          <span class="connection-identity"><strong>{{ bot.username || bot.app_id }}</strong><small>{{ bot.app_id }}</small></span>
-          <span>QQ_Official · {{ bot.mode === "websocket" ? "WebSocket" : "Webhook" }}</span>
-          <el-tag size="mini" :type="bot.connected ? 'success' : bot.state === 'failed' ? 'danger' : 'warning'">{{ qqStateLabel(bot) }}</el-tag>
-          <div v-if="bot.error" class="connection-error">
-            <strong>{{ bot.error.message }}</strong>
-            <span>真寻错误码：<code>{{ bot.error.code }}</code></span>
-            <span v-if="bot.error.provider_code">QQ错误码：<code>{{ bot.error.provider_code }}</code></span>
-            <span v-if="bot.error.http_status">HTTP：{{ bot.error.http_status }}</span>
-            <el-button v-if="bot.error.trace_id" type="text" size="mini" @click="copyText(bot.error.trace_id)">复制 Trace ID</el-button>
-          </div>
-        </div>
-      </div>
-
-      <el-collapse v-model="advancedSections" class="advanced-settings">
-        <el-collapse-item name="manual">
-          <template slot="title"><span class="advanced-title"><i class="el-icon-setting"></i> 高级手动配置</span></template>
-          <div class="manual-settings">
-            <div class="section-heading"><div><h2>QQ 官方机器人</h2><p>手动管理多 Bot、Webhook 与已有开放平台凭据。</p></div><div class="switch-line"><span>{{ qqForm.enabled ? "已启用" : "未启用" }}</span><el-switch v-model="qqForm.enabled" /></div></div>
-            <el-form v-if="qqForm.enabled" :model="qqForm" label-position="top">
+      <div v-else class="manual-settings">
+            <div class="section-heading"><div><h2>手动接入 QQ 官方机器人</h2><p>填写开放平台凭据，并选择官方 WebSocket 长连接或 Webhook。</p></div></div>
+            <el-form :model="qqForm" label-position="top">
               <div v-if="hasWebhookBots" class="form-grid">
                 <el-form-item label="Webhook 模式"><el-radio-group v-model="qqForm.webhook_mode" size="small"><el-radio-button label="external">自行 HTTPS 反代</el-radio-button><el-radio-button label="builtin_https">内置 HTTPS</el-radio-button></el-radio-group></el-form-item>
                 <el-form-item label="公网 HTTPS 基础地址"><el-input v-model.trim="qqForm.public_base_url" placeholder="https://bot.example.com" /><p class="field-help">不要填写 <code>/qq/webhook</code>，系统会自动拼接。</p></el-form-item>
@@ -83,14 +95,12 @@
             </el-form>
             <div v-if="hasWebhookBots" class="callback-panel" :class="{ ready: callbackReady }"><div class="callback-state"><i :class="callbackReady ? 'el-icon-circle-check' : 'el-icon-warning-outline'"></i></div><div><strong>{{ callbackReady ? "Webhook 已准备好" : "Webhook 尚未生效" }}</strong><p>{{ callbackDescription }}</p><code v-if="callbackUrl">{{ callbackUrl }}</code></div><el-button v-if="callbackUrl" size="small" icon="el-icon-document-copy" @click="copyText(callbackUrl)">复制回调地址</el-button></div>
             <div class="manual-actions"><span>配置会先保存，是否立即重启将由你确认；禁用 QQ 时会保留原有凭据。</span><el-button type="primary" :loading="saving" :disabled="!configuration.revision" @click="saveConfiguration">保存配置</el-button></div>
-          </div>
-        </el-collapse-item>
-      </el-collapse>
+      </div>
     </section>
 
     <el-dialog title="扫码接入 QQ 官方机器人" :visible.sync="registration.visible" width="min(420px, calc(100vw - 32px))" custom-class="qq-registration-dialog" :close-on-click-modal="false" :before-close="closeRegistration">
       <div class="qr-dialog-body">
-        <div v-if="registration.status === 'completed'" class="registered-bot"><el-avatar :size="72" :src="registration.bot.avatar_url || ''" icon="el-icon-user-solid" /><strong>{{ registration.bot.username || registration.bot.app_id }}</strong><span>AppID：{{ registration.bot.app_id }}</span></div>
+        <div v-if="registration.status === 'completed'" class="registered-bot"><el-avatar :size="72" :src="registration.bot.avatar_url || logoUrl" icon="el-icon-user-solid" /><strong>{{ registration.bot.username || registration.bot.app_id }}</strong><span>AppID：{{ registration.bot.app_id }}</span></div>
         <div v-else class="qr-frame" :class="registration.status"><img v-if="registration.qrDataUrl" :src="registration.qrDataUrl" alt="QQ 官方机器人绑定二维码" /><i v-else-if="registration.starting" class="el-icon-loading"></i><i v-else class="el-icon-warning-outline"></i></div>
         <h3>{{ registrationTitle }}</h3><p>{{ registrationDescription }}</p>
         <el-alert v-if="registration.error" type="error" :closable="false" :title="registration.error" />
@@ -103,6 +113,7 @@
 
 <script>
 import { apiErrorDetail } from "@/utils/api-error"
+import logoUrl from "@/assets/image/logo.png"
 import {
   confirmAndRestart,
   requestRestartWithRecovery,
@@ -119,7 +130,7 @@ export default {
       selectedPlatform: "qq_official", loading: false, saving: false, statusLoading: false,
       status: { onebot_v11_connected: false, qq_official_enabled: false, qq_official_connected: false, qq_webhook_mode: "external", qq_webhook_callback_url: null, connections: [], qq_bots: [], onebot_v11_reverse_ws_path: "/onebot/v11/ws", qq_webhook_path: "/qq/webhook" },
       configuration: { revision: "", launcher_managed: false, onebot: { has_access_token: false }, qq: { bots: [] } },
-      onebotToken: "", clearOnebotToken: false, advancedSections: [], registration: emptyRegistration(), registrationTimer: null,
+      onebotToken: "", clearOnebotToken: false, qqSetupMode: "scan", logoUrl, registration: emptyRegistration(), registrationTimer: null,
       qqForm: { enabled: false, bots: [], webhook_mode: "external", public_base_url: "", listen_host: "0.0.0.0", listen_port: 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: false, has_tls_keyfile: false },
     }
   },
@@ -127,6 +138,23 @@ export default {
     onebotWebSocketUrl() { const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"; return `${scheme}//${window.location.host}${this.status.onebot_v11_reverse_ws_path}` },
     hasAnyConnection() { return this.status.connections.length > 0 },
     hasWebhookBots() { return this.qqForm.bots.some((bot) => !bot.use_websocket) },
+    configuredBotRows() {
+      return this.qqForm.bots
+        .filter((bot) => bot.id)
+        .map((configured) => {
+          const runtime = this.status.qq_bots.find((item) => item.app_id === configured.id) || {}
+          return {
+            app_id: configured.id,
+            mode: configured.use_websocket ? "websocket" : "webhook",
+            state: this.qqForm.enabled ? runtime.state || "connecting" : "disabled",
+            connected: Boolean(runtime.connected),
+            username: runtime.username || "",
+            avatar_url: runtime.avatar_url || "",
+            error: runtime.error || null,
+            configured,
+          }
+        })
+    },
     platforms() { return [{ key: "qq_official", short: "QQ", name: "QQ 官方机器人", description: "扫码接入 · 官方 WebSocket", connected: this.status.qq_official_connected, status: this.status.qq_official_connected ? "已连接" : this.qqForm.enabled ? "等待连接" : "未接入" }, { key: "onebot_v11", short: "OB", name: "OneBot V11", description: "高级接入 · 反向 WebSocket", connected: this.status.onebot_v11_connected, status: this.status.onebot_v11_connected ? "已连接" : "未连接" }] },
     callbackUrl() { return this.status.qq_webhook_callback_url || (this.qqForm.public_base_url ? `${this.qqForm.public_base_url.replace(/\/$/, "")}/qq/webhook` : "") },
     callbackReady() { return Boolean(this.status.qq_official_connected && this.callbackUrl) },
@@ -178,6 +206,10 @@ export default {
       } catch (error) { this.$message.error(apiErrorDetail(error, "机器人移除失败。")) }
       finally { bot.removing = false }
     },
+    removeConfiguredBot(row) {
+      const index = this.qqForm.bots.indexOf(row.configured)
+      if (index >= 0) return this.removeBot(row.configured, index)
+    },
     canProbeBot(bot) { return Boolean(bot.id && (bot.secret || bot.has_secret)) },
     async probeBot(bot) { bot.probing = true; bot.probeResult = ""; try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/probe`, { id: bot.id, token: bot.token || null, secret: bot.secret || null }); if (!response || !response.suc) throw new Error(response && response.info); bot.probeResult = response.data.username || response.data.bot_id || "凭据有效" } catch (error) { this.$message.error(apiErrorDetail(error, "凭据验证失败。")) } finally { bot.probing = false } },
     async saveConfiguration() {
@@ -200,7 +232,7 @@ export default {
       })
       this.registration.visible = false
     },
-    qqStateLabel(bot) { return bot.connected ? "在线" : { authorizing: "鉴权中", gateway: "获取Gateway", connecting: "连接中", reconnecting: "重连中", failed: "连接失败" }[bot.state] || "等待连接" },
+    qqStateLabel(bot) { return bot.connected ? "在线" : { disabled: "已停用", authorizing: "鉴权中", gateway: "获取Gateway", connecting: "连接中", reconnecting: "重连中", failed: "连接失败" }[bot.state] || "等待连接" },
     async copyText(value) { try { await navigator.clipboard.writeText(value) } catch (error) { const input = document.createElement("textarea"); input.value = value; input.style.position = "fixed"; input.style.opacity = "0"; document.body.appendChild(input); input.select(); document.execCommand("copy"); input.remove() } this.$message.success("已复制") },
   },
 }
@@ -211,11 +243,12 @@ export default {
 .overall-status { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--border-color-light); border-radius: 20px; color: var(--text-color-secondary); }.overall-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--text-color-placeholder); }.overall-status.online { color: var(--success-color); }.overall-status.online span { background: var(--success-color); }
 .platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }.platform-card { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 13px 15px; border: 1px solid var(--border-color-light); border-radius: 7px; color: var(--text-color); background: var(--bg-color-secondary); cursor: pointer; text-align: left; }.platform-card.active { border-color: var(--primary-color); box-shadow: 0 3px 12px rgba(255,107,149,.1); }.platform-card > span:nth-child(2) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }.platform-card small { color: var(--text-color-secondary); }.platform-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 7px; color: #fff; font-weight: 700; background: #7564dd; }.platform-icon.qq_official { background: #0891b2; }
 .configuration-section, .scan-panel, .connected-list, .manual-settings { padding: 22px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color-secondary); }.scan-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 20px; }.scan-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 7px; color: #087f96; background: rgba(8,145,178,.1); font-size: 28px; }.scan-copy h2 { margin: 8px 0 6px; }.scan-copy p { margin: 0; color: var(--text-color-secondary); line-height: 1.6; }.scan-copy ul { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 0; padding-left: 18px; color: var(--text-color-secondary); font-size: 12px; }
-.connected-list { margin-top: 14px; }.connection-row { display: grid; grid-template-columns: auto minmax(140px, auto) 1fr auto; align-items: center; gap: 10px; padding: 13px 0; border-top: 1px solid var(--border-color-light); }.connection-identity { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.connection-identity small, .connection-row > span:nth-child(3) { color: var(--text-color-secondary); }.connection-error { display: flex; grid-column: 2 / -1; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 9px 11px; border-radius: 6px; color: var(--danger-color); background: rgba(224,82,96,.07); font-size: 12px; }.connection-error code { color: inherit; }
+.connected-list { margin-top: 14px; }.connection-row { display: grid; grid-template-columns: auto minmax(140px, auto) 1fr auto auto; align-items: center; gap: 10px; padding: 13px 0; border-top: 1px solid var(--border-color-light); }.connection-identity { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.connection-identity small, .connection-row > span:nth-child(3) { color: var(--text-color-secondary); }.connection-error { display: flex; grid-column: 2 / -1; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 9px 11px; border-radius: 6px; color: var(--danger-color); background: rgba(224,82,96,.07); font-size: 12px; }.connection-error code { color: inherit; }
+.qq-mode-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color-secondary); }.adapter-controls { display: flex; align-items: center; gap: 10px; color: var(--text-color-secondary); font-size: 13px; }
 .advanced-settings { margin-top: 14px; border: 0; }.advanced-title { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }.advanced-settings ::v-deep .el-collapse-item__header { padding: 0 14px; border: 1px solid var(--border-color-light); color: var(--text-color); background: var(--bg-color-secondary); }.advanced-settings ::v-deep .el-collapse-item__wrap { border: 0; background: transparent; }.advanced-settings ::v-deep .el-collapse-item__content { padding: 12px 0 0; }
 .section-heading { padding-bottom: 18px; border-bottom: 1px solid var(--border-color-light); }.section-heading h2, .bot-list-heading h3, .section-heading h3 { margin: 0 0 5px; }.section-heading.compact { padding-bottom: 12px; }.switch-line { display: flex; align-items: center; gap: 10px; }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; padding-top: 18px; }.span-2 { grid-column: span 2; }.copy-field { display: flex; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border-color-light); border-radius: 5px; background: var(--bg-color); }.copy-field code { min-width: 0; flex: 1; overflow-wrap: anywhere; }.field-actions, .probe-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--text-color-secondary); font-size: 12px; }.danger-text { color: var(--danger-color, #e05260) !important; }.field-help { margin: 5px 0 0; color: var(--text-color-secondary); font-size: 12px; }
 .bot-list-heading { align-items: center; margin-top: 16px; padding: 18px 0 12px; }.bot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.bot-entry { padding: 16px; border: 1px solid var(--border-color-light); border-radius: 7px; background: var(--bg-color); }.bot-entry header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }.bot-empty { display: flex; grid-column: 1 / -1; min-height: 150px; align-items: center; justify-content: center; flex-direction: column; gap: 8px; border: 1px dashed var(--border-color-light); border-radius: 7px; color: var(--text-color-secondary); }.bot-empty i { color: var(--primary-color); font-size: 30px; }.bot-empty strong { color: var(--text-color); }.probe-success { color: var(--success-color); }.muted { color: var(--text-color-secondary); }.builtin-settings { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-color-light); }.callback-panel { display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 16px; border: 1px solid rgba(214,158,46,.4); border-radius: 7px; background: rgba(214,158,46,.06); }.callback-panel.ready { border-color: rgba(56,161,105,.4); background: rgba(56,161,105,.06); }.callback-state { font-size: 27px; color: #c59027; }.callback-panel.ready .callback-state { color: var(--success-color); }.callback-panel > div:nth-child(2) { min-width: 0; flex: 1; }.callback-panel p { margin: 4px 0; color: var(--text-color-secondary); }.callback-panel code { overflow-wrap: anywhere; color: var(--text-color); }
 .manual-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color-light); }.manual-actions span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.qr-dialog-body { display: flex; align-items: center; flex-direction: column; text-align: center; }.qr-frame { display: grid; width: 282px; height: 282px; place-items: center; border: 1px solid var(--border-color-light); border-radius: 7px; background: #fff; }.qr-frame img { display: block; width: 260px; height: 260px; }.qr-frame > i { color: #8a9099; font-size: 38px; }.registered-bot { display: flex; align-items: center; flex-direction: column; gap: 7px; padding: 12px 0 4px; }.registered-bot span { color: var(--text-color-secondary); font-size: 12px; }.qr-dialog-body h3 { margin: 18px 0 7px; }.qr-dialog-body p { margin: 0 0 10px; color: var(--text-color-secondary); line-height: 1.6; }.qr-dialog-body .el-alert { margin-top: 8px; text-align: left; }
 @media (max-width: 900px) { .platform-grid, .form-grid, .bot-grid { grid-template-columns: 1fr; }.span-2 { grid-column: span 1; }.scan-panel { grid-template-columns: auto 1fr; }.scan-panel > .el-button { grid-column: 2; justify-self: start; }.callback-panel { align-items: flex-start; flex-direction: column; } }
-@media (max-width: 640px) { .page-heading, .section-heading, .bot-list-heading { align-items: stretch; flex-direction: column; }.configuration-section, .scan-panel, .connected-list, .manual-settings { padding: 16px; }.scan-panel { display: flex; align-items: stretch; flex-direction: column; }.scan-icon { width: 48px; height: 48px; }.scan-copy ul { display: block; }.connection-row { grid-template-columns: auto 1fr auto; }.connection-row > span:nth-child(3) { display: none; }.manual-actions { align-items: stretch; flex-direction: column; }.manual-actions span { margin: 0; }.field-actions, .probe-row { align-items: flex-start; flex-direction: column; }.qr-frame { width: min(282px, 78vw); height: min(282px, 78vw); }.qr-frame img { width: min(260px, 72vw); height: min(260px, 72vw); } }
+@media (max-width: 640px) { .page-heading, .section-heading, .bot-list-heading, .qq-mode-toolbar, .adapter-controls { align-items: stretch; flex-direction: column; }.configuration-section, .scan-panel, .connected-list, .manual-settings { padding: 16px; }.scan-panel { display: flex; align-items: stretch; flex-direction: column; }.scan-icon { width: 48px; height: 48px; }.scan-copy ul { display: block; }.connection-row { grid-template-columns: auto 1fr auto; }.connection-row > span:nth-child(3) { display: none; }.connection-row > .danger-text { grid-column: 3; grid-row: 1; }.manual-actions { align-items: stretch; flex-direction: column; }.manual-actions span { margin: 0; }.field-actions, .probe-row { align-items: flex-start; flex-direction: column; }.qr-frame { width: min(282px, 78vw); height: min(282px, 78vw); }.qr-frame img { width: min(260px, 72vw); height: min(260px, 72vw); } }
 </style>
