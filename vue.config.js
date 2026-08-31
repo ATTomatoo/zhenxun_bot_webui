@@ -1,5 +1,20 @@
 const { defineConfig } = require("@vue/cli-service")
+const { execFileSync } = require("child_process")
+const fs = require("fs")
 const path = require("path")
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"))
+
+let commit = "unknown"
+try {
+  commit = execFileSync("git", ["rev-parse", "--short=12", "HEAD"], {
+    cwd: __dirname,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim()
+} catch (error) {
+  // Source archives do not always include Git metadata.
+}
+process.env.VUE_APP_WEBUI_REVISION = `${pkg.version}:${commit}`
 module.exports = defineConfig({
   transpileDependencies: true,
 })

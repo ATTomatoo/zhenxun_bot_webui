@@ -23,6 +23,7 @@ import {
   deleteRequest,
   getBaseUrl,
 } from "@/utils/api"
+import { startWebuiRevisionPolling } from "@/utils/webui-revision"
 
 Vue.use(ElementUI)
 Vue.config.productionTip = false
@@ -43,6 +44,7 @@ Vue.prototype.$chatWebSocket = chatWebSocket
 Vue.prototype.$statusWebSocket = statusWebSocket
 Vue.prototype.$logWebSocket = logWebSocket
 Vue.prototype.$isMobile = isMobile
+startWebuiRevisionPolling()
 
 const vue = new Vue({
   router,

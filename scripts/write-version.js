@@ -19,6 +19,7 @@ try {
 const manifest = {
   version: pkg.version,
   commit,
+  revision: `${pkg.version}:${commit}`,
   built_at: new Date().toISOString(),
   api_version: 1,
   source: "official-dist",
