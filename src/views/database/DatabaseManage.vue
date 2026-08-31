@@ -90,7 +90,7 @@
 </template>
 
 <script>
-import { startRestartRecovery } from "@/utils/restart-recovery"
+import { confirmAndRestart } from "@/utils/restart-flow"
 
 export default {
   name: "DatabaseManage",
@@ -159,9 +159,11 @@ export default {
       finally { this.saving = false }
     },
     async restart() {
-      const response = await this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {})
-      if (!response.suc) throw new Error(response.info)
-      startRestartRecovery({ bootId: response.data.boot_id, accessUrls: response.data.access_urls, returnRoute: "/database", message: "数据服务配置将在新进程中生效。" })
+      return confirmAndRestart(this, {
+        prompt: "数据与缓存配置已保存，需要重启后生效。",
+        request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+        recovery: { policy: "preserve", returnRoute: "/database", message: "数据服务配置将在新进程中生效。" },
+      })
     },
     async refreshRuntime() { await this.cacheRequest("refresh", "/database/cache/refresh", {}) },
     async clearLocal() { await this.cacheRequest("local", "/database/cache/clear", { scope: "local" }) },
