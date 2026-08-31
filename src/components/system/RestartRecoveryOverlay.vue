@@ -49,17 +49,22 @@ export default {
     async poll(runId) {
       for (let attempt = 0; attempt < 80 && runId === this.runId; attempt += 1) {
         await wait(1500)
-        for (const baseUrl of this.state.accessUrls) {
+        const preferred = this.state.preferredOrigin || this.state.accessUrls[0]
+        const fallback = this.state.fallbackUrls || []
+        const candidates = attempt < 8 ? [preferred] : [preferred, ...fallback]
+        for (const baseUrl of candidates.filter(Boolean)) {
           try {
             const response = await fetch(`${baseUrl}/zhenxun/api/configure/status`, { cache: "no-store" })
             if (!response.ok) continue
             const payload = await response.json()
             const bootId = payload && payload.data && payload.data.boot_id
             if (!bootId || bootId === this.state.bootId) continue
+            this.runId += 1
             clearRestartRecovery()
             if (this.state.setup) {
               window.sessionStorage.removeItem("zhenxunSetupToken")
               window.sessionStorage.removeItem("zhenxunSetupRestartReceipt")
+              window.sessionStorage.removeItem("zhenxunSetupRestartTargets")
             }
             window.location.replace(`${baseUrl}/#${this.state.returnRoute}`)
             return

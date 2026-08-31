@@ -270,11 +270,11 @@
             v-else
             type="primary"
             class="final-action"
-            :disabled="!canApply"
+            :disabled="serverState !== 'restart_pending' && !canApply"
             @click="saveAndRestart"
           >
             <i v-if="applying" class="el-icon-loading" />
-            {{ applying ? "正在保存" : "保存并重启" }}
+            {{ applying ? "正在处理" : serverState === "restart_pending" ? "立即重启" : "保存配置" }}
           </button>
         </footer>
       </template>
@@ -286,10 +286,11 @@
 <script>
 import logoUrl from "@/assets/image/logo.png"
 import { buildRestartTargets } from "@/utils/restart-targets"
-import { startRestartRecovery } from "@/utils/restart-recovery"
+import { confirmAndRestart } from "@/utils/restart-flow"
 
 const SETUP_TOKEN_KEY = "zhenxunSetupToken"
 const RESTART_RECEIPT_KEY = "zhenxunSetupRestartReceipt"
+const RESTART_TARGETS_KEY = "zhenxunSetupRestartTargets"
 
 const ProbeResult = {
   name: "ProbeResult",
@@ -426,6 +427,7 @@ export default {
         if (this.serverState === "restart_pending") {
           const receipt = window.sessionStorage.getItem(RESTART_RECEIPT_KEY)
           if (this.setupToken && receipt) {
+            try { this.restartUrls = JSON.parse(window.sessionStorage.getItem(RESTART_TARGETS_KEY) || "[]") } catch (error) { this.restartUrls = [] }
             this.claimed = true
             this.step = 3
           }
@@ -442,6 +444,7 @@ export default {
     clearSetupState() {
       window.sessionStorage.removeItem(SETUP_TOKEN_KEY)
       window.sessionStorage.removeItem(RESTART_RECEIPT_KEY)
+      window.sessionStorage.removeItem(RESTART_TARGETS_KEY)
     },
     async loadDraft() {
       try {
@@ -517,6 +520,11 @@ export default {
     },
     async saveAndRestart() {
       if (!this.canApply) return
+      if (this.serverState === "restart_pending") {
+        const receipt = window.sessionStorage.getItem(RESTART_RECEIPT_KEY)
+        if (receipt) await this.restartSavedConfiguration(receipt, false)
+        return
+      }
       this.applying = true
       this.applyError = ""
       try {
@@ -544,27 +552,37 @@ export default {
         this.serverState = "restart_pending"
         this.restartUrls = this.buildRestartUrls(response.data.access_urls || [])
         window.sessionStorage.setItem(RESTART_RECEIPT_KEY, response.data.restart_receipt)
-        const restart = await this.postRequest(
-          `${this.$root.prefix}/configure/restart`,
-          { receipt: response.data.restart_receipt },
-          this.setupHeaders
-        )
-        if (!restart.suc) {
-          this.applyError = restart.info || "重启请求未被接受。"
-          return
-        }
-        startRestartRecovery({
-          bootId: restart.data.boot_id,
-          accessUrls: this.restartUrls,
-          returnRoute: "/",
-          message: "首次配置已保存，正在等待新进程完成启动。",
-          setup: true,
-        })
+        window.sessionStorage.setItem(RESTART_TARGETS_KEY, JSON.stringify(this.restartUrls))
+        await this.restartSavedConfiguration(response.data.restart_receipt, true)
       } catch (error) {
         this.applyError = (error.response && error.response.data && error.response.data.detail) || "保存配置时发生错误。"
       } finally {
         this.applying = false
       }
+    },
+    async restartSavedConfiguration(receipt, askConfirmation) {
+      const policy = this.network.mode === "lan" ? "network" : this.network.mode
+      const options = {
+        prompt: "首次配置已保存，需要重启后才能开始使用真寻。",
+        request: () => this.postRequest(
+          `${this.$root.prefix}/configure/restart`,
+          { receipt },
+          this.setupHeaders
+        ),
+        recovery: {
+          policy,
+          preferredUrl: this.restartUrls[0] || "",
+          accessUrls: this.restartUrls,
+          returnRoute: "/",
+          message: "首次配置已保存，正在等待新进程完成启动。",
+          setup: true,
+        },
+      }
+      if (askConfirmation) return confirmAndRestart(this, options)
+      return confirmAndRestart(this, {
+        ...options,
+        prompt: "配置已经保存，确认现在重启真寻吗？",
+      })
     },
     buildRestartUrls(urls) {
       return buildRestartTargets({

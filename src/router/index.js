@@ -26,6 +26,8 @@ const About = () =>
   import(/* webpackChunkName: "about" */ "@/views/about/About")
 const ProtocolSetting = () =>
   import(/* webpackChunkName: "protocol" */ "@/views/protocol/ProtocolSetting")
+const AIConfiguration = () =>
+  import(/* webpackChunkName: "ai-configuration" */ "@/views/ai/AIConfiguration")
 const ConsoleConnect = () =>
   import(/* webpackChunkName: "connect" */ "@/views/ConsoleConnect")
 
@@ -75,6 +77,7 @@ const routes = [
       },
       { path: "/database", name: "数据库管理", component: DatabaseManage },
       { path: "/protocol", name: "机器人接入", component: ProtocolSetting },
+      { path: "/ai", name: "AI 配置", component: AIConfiguration },
       { path: "/system", name: "系统信息", component: SystemInfo },
       { path: "/about", name: "关于我们", component: About },
     ],
@@ -90,6 +93,48 @@ const router = new VueRouter({
       return { x: 0, y: 0 }
     }
   },
+})
+
+const CHUNK_RELOAD_KEY = "zhenxunChunkReloadTarget"
+
+function isChunkLoadError(error) {
+  const message = String((error && error.message) || error || "")
+  return (
+    error?.name === "ChunkLoadError" ||
+    error?.code === "CSS_CHUNK_LOAD_FAILED" ||
+    /Loading (CSS )?chunk \d+ failed/i.test(message)
+  )
+}
+
+router.onError((error) => {
+  if (!isChunkLoadError(error)) {
+    console.error(error)
+    return
+  }
+
+  const target = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (window.sessionStorage.getItem(CHUNK_RELOAD_KEY) !== target) {
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, target)
+    window.location.reload()
+    return
+  }
+
+  MessageBox.alert(
+    "前后端 WebUI 资源版本不一致，请刷新页面。若问题持续存在，请重新部署完整构建资源。",
+    "页面资源加载失败",
+    {
+      type: "error",
+      confirmButtonText: "重新加载",
+      callback: () => {
+        window.sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+        window.location.reload()
+      },
+    }
+  )
+})
+
+router.afterEach(() => {
+  window.sessionStorage.removeItem(CHUNK_RELOAD_KEY)
 })
 
 router.beforeEach(async (to, from, next) => {
