@@ -22,3 +22,27 @@ export const apiErrorIssues = (error) => {
   const detail = error?.response?.data?.detail
   return detail && Array.isArray(detail.issues) ? detail.issues : []
 }
+
+export const apiErrorDiagnostic = (error, fallback) => {
+  const detail = error?.response?.data?.detail
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    return {
+      code: detail.code || "request_failed",
+      message: detail.message || fallback,
+      provider_code: detail.provider_code || null,
+      provider_explanation: detail.provider_explanation || null,
+      suggestion: detail.suggestion || null,
+      http_status: detail.http_status || error?.response?.status || null,
+      trace_id: detail.trace_id || null,
+    }
+  }
+  return {
+    code: "request_failed",
+    message: apiErrorDetail(error, fallback),
+    provider_code: null,
+    provider_explanation: null,
+    suggestion: null,
+    http_status: error?.response?.status || null,
+    trace_id: null,
+  }
+}

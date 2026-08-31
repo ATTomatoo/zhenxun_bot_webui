@@ -22,6 +22,7 @@ import {
 } from "@/utils/restart-recovery"
 
 const wait = (duration) => new Promise((resolve) => window.setTimeout(resolve, duration))
+const REQUEST_TIMEOUT = 3000
 
 export default {
   name: "RestartRecoveryOverlay",
@@ -46,6 +47,42 @@ export default {
       this.runId += 1
       this.poll(this.runId)
     },
+    async readStatus(baseUrl) {
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
+      try {
+        const url = new URL("/zhenxun/api/configure/status", baseUrl)
+        url.searchParams.set("_", String(Date.now()))
+        const response = await fetch(url.toString(), {
+          cache: "no-store",
+          credentials: "omit",
+          signal: controller.signal,
+        })
+        return response.ok ? response.json() : null
+      } finally {
+        window.clearTimeout(timeout)
+      }
+    },
+    finish(baseUrl) {
+      const returnRoute = this.state.returnRoute.startsWith("/")
+        ? this.state.returnRoute
+        : `/${this.state.returnRoute}`
+      const target = `${baseUrl}/#${returnRoute}`
+      this.runId += 1
+      this.visible = false
+      clearRestartRecovery()
+      if (this.state.setup) {
+        window.sessionStorage.removeItem("zhenxunSetupToken")
+        window.sessionStorage.removeItem("zhenxunSetupRestartReceipt")
+        window.sessionStorage.removeItem("zhenxunSetupRestartTargets")
+      }
+      if (new URL(target).origin === window.location.origin) {
+        window.history.replaceState(null, "", `/#${returnRoute}`)
+        window.location.reload()
+        return
+      }
+      window.location.replace(target)
+    },
     async poll(runId) {
       for (let attempt = 0; attempt < 80 && runId === this.runId; attempt += 1) {
         await wait(1500)
@@ -59,19 +96,10 @@ export default {
             : [preferred, ...fallback]
         for (const baseUrl of candidates.filter(Boolean)) {
           try {
-            const response = await fetch(`${baseUrl}/zhenxun/api/configure/status`, { cache: "no-store" })
-            if (!response.ok) continue
-            const payload = await response.json()
+            const payload = await this.readStatus(baseUrl)
             const bootId = payload && payload.data && payload.data.boot_id
             if (!bootId || bootId === this.state.bootId) continue
-            this.runId += 1
-            clearRestartRecovery()
-            if (this.state.setup) {
-              window.sessionStorage.removeItem("zhenxunSetupToken")
-              window.sessionStorage.removeItem("zhenxunSetupRestartReceipt")
-              window.sessionStorage.removeItem("zhenxunSetupRestartTargets")
-            }
-            window.location.replace(`${baseUrl}/#${this.state.returnRoute}`)
+            this.finish(baseUrl)
             return
           } catch (error) {
             // Connection failures are expected while launcher replaces the worker.
