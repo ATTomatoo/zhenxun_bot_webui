@@ -193,6 +193,8 @@ export default {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/simple`, { expected_revision: this.simpleRevision, fields: this.simpleChanges })
         if (!response.suc) throw new Error(response.info)
         this.simpleRevision = response.data.revision; this.simpleChanges = {}; clearDirtyState("plugin-configuration"); this.$message.success(response.info)
+        if (response.data.restart_available) await this.restart(response.data.access_urls || [], { preserveOrigin: true })
+        else if (response.data.restart_required) this.$message.warning("配置已保存，请手动重启真寻后生效。")
       } catch (error) { this.pluginIssues = apiErrorIssues(error); this.$message.error(apiErrorDetail(error, "保存失败")) }
       finally { this.saving = "" }
     },
@@ -221,25 +223,25 @@ export default {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/${this.rawFile}`, { expected_revision: this.rawRevision, content: this.rawContent })
         if (!response.suc) throw new Error(response.info)
         this.rawRevision = response.data.revision; this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart(response.data.access_urls || [])
+        if (response.data.restart_available) await this.restart(response.data.access_urls || [], { preserveOrigin: this.rawFile === "simple" })
         else if (response.data.restart_required) this.$message.warning("配置已保存，请手动重启真寻后生效。")
         else await this.loadSummary()
       } catch (error) { this.rawIssues = apiErrorIssues(error); this.rawError = apiErrorDetail(error, "保存失败。"); if (error.response?.status === 409) this.$set(this.rawLoaded, this.rawFile, false) }
       finally { this.saving = "" }
     },
-    async restart(accessUrls) {
+    async restart(accessUrls, { preserveOrigin = false } = {}) {
       const host = String(this.envFields.HOST || "0.0.0.0"); const port = Number(this.envFields.PORT || 8080)
       const mode = host === "127.0.0.1" ? "local" : host === "0.0.0.0" || host === "::" ? "lan" : "custom"
       this.restartTargets = buildRestartTargets({ mode, customHost: host, port, accessUrls })
       return confirmAndRestart(this, {
-        prompt: "环境配置已保存，需要重启后生效。",
+        prompt: "配置已保存，需要重启后生效。",
         request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
         recovery: {
-          policy: mode === "lan" ? "network" : mode,
-          preferredUrl: this.restartTargets[0] || "",
+          policy: preserveOrigin ? "preserve" : mode === "lan" ? "network" : mode,
+          preferredUrl: preserveOrigin ? window.location.origin : this.restartTargets[0] || "",
           accessUrls: this.restartTargets,
           returnRoute: "/system",
-          message: "环境配置将在新进程中生效。",
+          message: "配置将在新进程中生效。",
         },
       })
     },
