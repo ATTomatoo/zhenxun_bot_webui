@@ -51,14 +51,32 @@
             <div><dt>类型</dt><dd>{{ plugin.plugin_type || "其他" }}</dd></div>
             <div><dt>来源</dt><dd>{{ plugin.source === "official" ? "官方" : "社区" }}</dd></div>
           </dl>
+          <div v-if="plugin.installed" class="reload-diagnostic">
+            <el-tag
+              size="mini"
+              :type="plugin.reload_support === 'hot_reloadable' ? 'success' : 'info'"
+              effect="plain"
+            >
+              {{ plugin.reload_support === "hot_reloadable" ? "支持热加载" : "更新需重启" }}
+            </el-tag>
+          </div>
           <footer class="plugin-actions">
             <el-button type="text" @click="showDetails(plugin)">详情</el-button>
             <el-tooltip content="打开插件仓库" placement="top">
               <el-button v-if="repositoryUrl(plugin)" class="icon-action" icon="el-icon-link" circle @click="openRepository(plugin)" />
             </el-tooltip>
             <span class="action-spacer"></span>
+            <el-tooltip v-if="plugin.installed && plugin.reload_support === 'hot_reloadable'" content="热重载插件" placement="top">
+              <el-button
+                class="icon-action"
+                icon="el-icon-refresh"
+                circle
+                :loading="actionId === plugin.id && actionType === 'reload'"
+                @click="runAction('reload', plugin)"
+              />
+            </el-tooltip>
             <el-button v-if="!plugin.installed" type="primary" size="small" :loading="actionId === plugin.id" @click="runAction('install', plugin)">安装</el-button>
-            <el-button v-else-if="plugin.update_available" type="warning" size="small" :loading="actionId === plugin.id" @click="runAction('update', plugin)">更新</el-button>
+            <el-button v-else-if="plugin.update_available" type="warning" size="small" :loading="actionId === plugin.id && actionType === 'update'" @click="runAction('update', plugin)">更新</el-button>
             <el-dropdown v-else trigger="click" @command="runAction($event, plugin)">
               <el-button size="small">已安装<i class="el-icon-arrow-down el-icon--right" /></el-button>
               <el-dropdown-menu slot="dropdown">
@@ -93,7 +111,7 @@
 export default {
   name: "StoreTemplate",
   data() {
-    return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, drawerVisible: false, selectedPlugin: null }
+    return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, actionType: "", drawerVisible: false, selectedPlugin: null }
   },
   computed: {
     pluginOperation() { return this.$store.state.pluginOperation },
@@ -118,6 +136,20 @@ export default {
     repositoryUrl(plugin) { return plugin.github_url || plugin.ali_url || "" },
     openRepository(plugin) { window.open(this.repositoryUrl(plugin), "_blank", "noopener,noreferrer") },
     showDetails(plugin) { this.selectedPlugin = plugin; this.drawerVisible = true },
+    operationResult(response, fallback) {
+      const mode = response.data?.apply_mode
+      const labels = {
+        hot_reloaded: "运行时已热加载，无需重启。",
+        restart_requested: "已请求受控重启，重启完成后生效。",
+        restart_pending: "当前不是 launcher 模式，需要手动重启后生效。",
+        failed: "插件文件已变更，但运行时应用失败，请查看运行状态。",
+      }
+      const detail = labels[mode]
+      return {
+        status: mode === "failed" ? "error" : "success",
+        message: [fallback, detail].filter(Boolean).join("\n"),
+      }
+    },
     async loadPlugins() {
       this.loading = true; this.error = ""
       try {
@@ -130,7 +162,7 @@ export default {
       } finally { this.loading = false }
     },
     async runAction(action, plugin) {
-      const labels = { install: "安装", update: "更新", remove: "卸载" }
+      const labels = { install: "安装", update: "更新", remove: "卸载", reload: "热重载" }
       if (this.pluginOperation.active) {
         this.$message.warning("已有插件操作正在进行，请等待完成。")
         return
@@ -138,20 +170,28 @@ export default {
       const confirmed = await this.$cuteConfirm({ title: `${labels[action]}插件`, message: `确认${labels[action]}“${plugin.name}”？`, confirmButtonText: "确认", cancelButtonText: "取消", type: action === "remove" ? "warning" : "info" })
       if (!confirmed) return
       this.actionId = plugin.id
-      const runningTitle = action === "remove" ? "正在卸载插件" : "正在下载并安装插件"
+      this.actionType = action
+      const runningTitles = {
+        install: "正在下载并安装插件",
+        update: "正在下载并更新插件",
+        remove: "正在卸载插件",
+        reload: "正在热重载插件",
+      }
       this.$store.commit("START_PLUGIN_OPERATION", {
         action,
         pluginName: plugin.name,
-        title: runningTitle,
+        title: runningTitles[action],
         message: "请稍候，切换到其他页面不会中断当前操作。",
       })
       try {
-        const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, { id: plugin.id })
+        const payload = action === "reload" ? { module: plugin.module } : { id: plugin.id }
+        const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload)
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
+        const operation = this.operationResult(response, response.info || `${labels[action]}已完成。`)
         this.$store.commit("FINISH_PLUGIN_OPERATION", {
-          status: "success",
-          title: `插件${labels[action]}完成`,
-          message: response.info || `${labels[action]}已完成。`,
+          status: operation.status,
+          title: operation.status === "error" ? `插件${labels[action]}后应用失败` : `插件${labels[action]}完成`,
+          message: operation.message,
         })
         if (!this._isDestroyed) await this.loadPlugins()
       } catch (error) {
@@ -161,7 +201,7 @@ export default {
           message: error.response?.data?.detail || error.message || `${labels[action]}失败`,
         })
       }
-      finally { this.actionId = null }
+      finally { this.actionId = null; this.actionType = "" }
     },
   },
 }
@@ -179,6 +219,7 @@ export default {
 .plugin-title span, .detail-module { color: var(--text-color-secondary); font-family: Consolas, monospace; font-size: 12px; }
 .plugin-description { display: -webkit-box; min-height: 44px; margin: 14px 0; overflow: hidden; color: var(--text-color-secondary); line-height: 22px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .plugin-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0 0 14px; }.plugin-meta div { min-width: 0; }.plugin-meta dt { color: var(--text-color-secondary); font-size: 11px; }.plugin-meta dd { margin: 2px 0 0; overflow: hidden; color: var(--text-color); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.reload-diagnostic { min-height: 24px; margin-bottom: 8px; }
 .plugin-actions { display: flex; min-height: 34px; align-items: center; gap: 7px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-color); }.action-spacer { flex: 1; }.icon-action { width: 32px; height: 32px; padding: 0; }
 .inline-state, .empty-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 96px; color: var(--text-color-secondary); }.inline-state.is-error { margin-bottom: 14px; border: 1px solid var(--el-color-danger-light-7); border-radius: 6px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
 .empty-state { min-height: 300px; flex-direction: column; }.empty-state i { font-size: 34px; }.empty-state h2, .empty-state p { margin: 0; }.store-pagination { margin-top: 20px; text-align: center; }

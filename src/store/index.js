@@ -4,6 +4,7 @@ import createPersistedState from "vuex-persistedstate"
 import statusWebSocket from "@/utils/websocket/status-websocket"
 import logWebSocket from "@/utils/websocket/log-websocket"
 import chatWebSocket from "@/utils/websocket/chat-websocket"
+import { handleWebuiRevision } from "@/utils/webui-revision"
 
 Vue.use(Vuex)
 
@@ -25,6 +26,8 @@ export default new Vuex.Store({
     chatObj: {}, // 聊天ws信息存储
     _chatId: null,
     wsStatusData: null,
+    runtimeGeneration: 0,
+    webuiRevision: "",
     wsStatusObj: {
       cpuList: [],
       memoryList: [],
@@ -93,6 +96,9 @@ export default new Vuex.Store({
       state._chatId = chatId
     },
     SET_WS_STATUS_DATA(state, data) {
+      state.runtimeGeneration = Number(data.runtime_generation || 0)
+      state.webuiRevision = data.webui_revision || ""
+      handleWebuiRevision(state.webuiRevision)
       state.wsStatusObj.timeList.push(data.check_time.split("T")[1])
       state.wsStatusObj.cpuList.push(data.cpu)
       state.wsStatusObj.memoryList.push(data.memory)
