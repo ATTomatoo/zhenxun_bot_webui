@@ -81,7 +81,7 @@
 
     <div v-if="probeError" class="inline-error">{{ probeError }}</div>
     <footer class="save-bar">
-      <span>{{ launcherManaged ? "保存后将由 launcher 受控重启" : "当前为直接 worker，保存后需手动重启" }}</span>
+      <span>{{ launcherManaged ? "保存后可确认由 launcher 受控重启" : "当前为直接 worker，保存后需手动重启" }}</span>
       <el-button :loading="probing" @click="probe">测试连接</el-button>
       <el-button type="primary" :loading="saving" @click="save">保存配置</el-button>
     </footer>
@@ -90,7 +90,8 @@
 </template>
 
 <script>
-import { confirmAndRestart } from "@/utils/restart-flow"
+import { handleApplyResult } from "@/utils/apply-result"
+import { setDirtyState, clearDirtyState } from "@/utils/dirty-state"
 
 export default {
   name: "DatabaseManage",
@@ -100,6 +101,7 @@ export default {
       database: { mode: "sqlite", path: "data/db/zhenxun.db", host: "127.0.0.1", port: 3306, username: "", password: "", database: "", url: "" },
       cache: { mode: "MEMORY", host: "127.0.0.1", port: 6379, password: "" },
       probeResults: {},
+      originalPayload: "",
     }
   },
   computed: {
@@ -118,6 +120,11 @@ export default {
     },
   },
   mounted() { this.loadRuntime() },
+  beforeDestroy() { clearDirtyState("database-configuration") },
+  watch: {
+    database: { deep: true, handler() { this.updateDirtyState() } },
+    cache: { deep: true, handler() { this.updateDirtyState() } },
+  },
   methods: {
     statusLabel(status) { return { ok: "连接正常", warning: "需要注意", error: "连接异常" }[status] || "尚未检查" },
     formatNumber(value) { return value == null ? "-" : Number(value).toLocaleString() },
@@ -130,11 +137,16 @@ export default {
         this.runtime = response.data; this.revision = response.data.revision; this.launcherManaged = response.data.launcher_managed
         this.database = { ...this.database, ...response.data.database.configuration }
         this.cache = { ...this.cache, ...response.data.cache.configuration }
+        this.$nextTick(() => { this.originalPayload = JSON.stringify(this.payload()); clearDirtyState("database-configuration") })
       } catch (error) { this.probeError = error.response?.data?.detail || error.message || "数据服务状态加载失败。" }
       finally { this.loading = false }
     },
     payload() {
       return { database: { ...this.database, port: this.database.port || null }, cache: { ...this.cache } }
+    },
+    updateDirtyState() {
+      if (!this.originalPayload) return
+      setDirtyState("database-configuration", JSON.stringify(this.payload()) !== this.originalPayload)
     },
     async probe() {
       this.probing = true; this.probeError = ""
@@ -152,18 +164,15 @@ export default {
       try {
         const response = await this.putRequest(`${this.$root.prefix}/database/configuration`, { expected_revision: this.revision, ...this.payload() })
         if (!response.suc) { this.probeResults = response.data || {}; throw new Error(response.info) }
-        this.revision = response.data.revision; this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart()
-        else this.$message.warning("配置已保存，请手动重启真寻后生效。")
+        this.revision = response.data.revision; this.originalPayload = JSON.stringify(this.payload()); clearDirtyState("database-configuration")
+        await handleApplyResult(this, response, {
+          restartPrompt: "数据与缓存配置已保存，需要重启后生效。",
+          restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          returnRoute: "/database",
+          recoveryMessage: "数据服务配置将在新进程中生效。",
+        })
       } catch (error) { this.probeError = error.response?.data?.detail || error.message || "配置保存失败。" }
       finally { this.saving = false }
-    },
-    async restart() {
-      return confirmAndRestart(this, {
-        prompt: "数据与缓存配置已保存，需要重启后生效。",
-        request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
-        recovery: { policy: "preserve", returnRoute: "/database", message: "数据服务配置将在新进程中生效。" },
-      })
     },
     async refreshRuntime() { await this.cacheRequest("refresh", "/database/cache/refresh", {}) },
     async clearLocal() { await this.cacheRequest("local", "/database/cache/clear", { scope: "local" }) },

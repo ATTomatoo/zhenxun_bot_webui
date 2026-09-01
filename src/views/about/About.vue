@@ -70,7 +70,10 @@
           </div>
           <div class="version-actions">
             <span>{{ component.ref ? `来源 ${component.ref}` : "官方仓库" }}</span>
-            <el-button type="primary" size="small" :loading="isUpdating(component.key)" :disabled="!canUpdate(component)" @click="startUpdate(component)">
+            <el-button v-if="isPendingUpdate(component.key)" type="primary" size="small" icon="el-icon-refresh-right" @click="applyUpdate(jobFor(component.key))">
+              立即重启并应用
+            </el-button>
+            <el-button v-else type="primary" size="small" :loading="isUpdating(component.key)" :disabled="!canUpdate(component)" @click="startUpdate(component)">
               {{ component.updateAvailable ? "立即更新" : "重新安装" }}
             </el-button>
           </div>
@@ -104,6 +107,7 @@
 
 <script>
 import logoUrl from "@/assets/image/logo.png"
+import { requestRestartWithRecovery } from "@/utils/restart-flow"
 
 const COMPONENT_META = {
   bot: { name: "真寻本体", icon: "el-icon-cpu" },
@@ -154,11 +158,12 @@ export default {
       finally { this.checking = false }
     },
     jobFor(component) { return this.jobs[component] },
+    isPendingUpdate(component) { return this.jobFor(component)?.state === "pending_restart" },
     isUpdating(component) { const job = this.jobFor(component); return Boolean(job && !["completed", "failed"].includes(job.state)) },
     canUpdate(component) { if (component.blocked || this.isUpdating(component.key) || component.latestVersion === "未知") return false; return component.key !== "webui" || (component.manifestAvailable && component.compatible) },
     jobProgressStatus(job) { if (job.state === "failed") return "exception"; if (job.state === "completed") return "success"; return undefined },
     jobStateLabel(job) {
-      const labels = { queued: "等待执行", preparing: "正在下载并校验", staged: "更新包已就绪", pending_restart: job.restart_available ? "等待自动重启应用" : "等待手动重启应用", applying: "正在应用更新", completed: "更新完成", failed: `更新失败：${job.error || "未知错误"}` }
+      const labels = { queued: "等待执行", preparing: "正在下载并校验", staged: "更新包已就绪", pending_restart: job.restart_available ? "已下载，等待确认重启应用" : "已下载，等待手动重启应用", restart_requested: "正在重启并应用", applying: "正在应用更新", completed: "更新完成", failed: `更新失败：${job.error || "未知错误"}` }
       return labels[job.state] || job.state
     },
     jobSourceLabel(job) {
@@ -180,6 +185,16 @@ export default {
         sessionStorage.setItem("zhenxun_update_job_id", response.data.job_id)
         this.pollJob(response.data.job_id)
       } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "更新任务创建失败。") }
+    },
+    async applyUpdate(job) {
+      try {
+        await requestRestartWithRecovery(this, {
+          request: () => this.postRequest(`${this.$root.prefix}/system/update/jobs/${job.job_id}/apply`, {}),
+          recovery: { policy: "preserve", returnRoute: "/about", message: "正在重启并应用已校验的更新。" },
+        })
+      } catch (error) {
+        this.$message.error(error.response?.data?.detail || error.message || "更新应用请求失败。")
+      }
     },
     pollJob(jobId, immediate = false) {
       if (this.pollTimer) window.clearTimeout(this.pollTimer)

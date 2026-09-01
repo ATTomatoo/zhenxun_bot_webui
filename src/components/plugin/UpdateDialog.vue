@@ -238,6 +238,7 @@
 
 <script>
 import AutoComponent from "./AutoComponent.vue"
+import { handleApplyResult } from "@/utils/apply-result"
 import { clearDirtyState, setDirtyState } from "@/utils/dirty-state"
 import NeonInput from "@/components/ui/NeonInput.vue"
 import NekoSelect from "@/components/ui/NekoSelect.vue"
@@ -439,14 +440,18 @@ export default {
           this.postRequest(
             `${this.$root.prefix}/plugin/update_plugin`,
             data
-          ).then((resp) => {
+          ).then(async (resp) => {
             if (resp.suc) {
               if (resp.warning) {
                 this.$message.warning(resp.warning)
               } else {
-                this.$message.success(resp.info)
                 this.initialData = JSON.stringify(this.updateData)
                 clearDirtyState(this.dirtySource)
+                await handleApplyResult(this, resp, {
+                  restartPrompt: "插件配置已保存，需要重启后生效。",
+                  restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+                  returnRoute: this.$route.path,
+                })
                 this.$emit("close", true)
               }
             } else {

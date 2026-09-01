@@ -107,9 +107,10 @@
 <script>
 import QQDiagnostic from "@/components/protocol/QQDiagnostic.vue"
 import { apiErrorDetail, apiErrorDiagnostic } from "@/utils/api-error"
+import { handleApplyResult, notifyRestartStatusChanged } from "@/utils/apply-result"
+import { setDirtyState, clearDirtyState } from "@/utils/dirty-state"
 import logoUrl from "@/assets/image/logo.png"
 import {
-  confirmAndRestart,
   requestRestartWithRecovery,
 } from "@/utils/restart-flow"
 
@@ -127,6 +128,7 @@ export default {
       configuration: { revision: "", launcher_managed: false, onebot: { has_access_token: false }, qq: { bots: [] } },
       onebotToken: "", clearOnebotToken: false, qqSetupMode: "scan", logoUrl, registration: emptyRegistration(), registrationTimer: null,
       qqForm: { enabled: false, bots: [], webhook_mode: "external", public_base_url: "", listen_host: "0.0.0.0", listen_port: 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: false, has_tls_keyfile: false },
+      originalProtocol: "",
     }
   },
   computed: {
@@ -158,14 +160,21 @@ export default {
     registrationDescription() { if (this.registration.status === "completed") return this.registration.restartAvailable ? "配置已安全保存。可以立即重启，也可以稍后从顶部重启真寻。" : "配置已安全保存，请手动重启真寻后连接机器人。"; if (this.registration.status === "expired") return "请重新生成二维码后再扫描。"; if (this.registration.status === "error") return "可以重试当前操作或重新生成二维码。"; return "使用手机 QQ 扫描二维码，并按页面提示选择或创建机器人。" },
   },
   async mounted() { await Promise.all([this.loadConfiguration(), this.loadStatus()]) },
-  beforeDestroy() { this.clearRegistrationTimer() },
+  beforeDestroy() { this.clearRegistrationTimer(); clearDirtyState("protocol-configuration") },
+  watch: {
+    qqForm: { deep: true, handler() { this.updateDirtyState() } },
+    onebotToken() { this.updateDirtyState() },
+    clearOnebotToken() { this.updateDirtyState() },
+  },
   methods: {
     async loadConfiguration() {
       this.loading = true
-      try { const response = await this.getRequest(`${this.$root.prefix}/protocol/configuration`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration = response.data; const qq = response.data.qq; this.qqForm = { enabled: qq.enabled, bots: (qq.bots || []).map((bot) => ({ ...emptyBot(), ...bot, use_websocket: Boolean(qq.bot_modes?.[bot.id]) })), webhook_mode: qq.webhook_mode || "external", public_base_url: qq.public_base_url || "", listen_host: qq.listen_host || "0.0.0.0", listen_port: qq.listen_port || 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: qq.has_tls_certfile, has_tls_keyfile: qq.has_tls_keyfile } }
+      try { const response = await this.getRequest(`${this.$root.prefix}/protocol/configuration`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration = response.data; const qq = response.data.qq; this.qqForm = { enabled: qq.enabled, bots: (qq.bots || []).map((bot) => ({ ...emptyBot(), ...bot, use_websocket: Boolean(qq.bot_modes?.[bot.id]) })), webhook_mode: qq.webhook_mode || "external", public_base_url: qq.public_base_url || "", listen_host: qq.listen_host || "0.0.0.0", listen_port: qq.listen_port || 443, tls_certfile: "", tls_keyfile: "", has_tls_certfile: qq.has_tls_certfile, has_tls_keyfile: qq.has_tls_keyfile }; this.$nextTick(() => { this.originalProtocol = this.protocolSnapshot(); clearDirtyState("protocol-configuration") }) }
       catch (error) { this.$message.error(apiErrorDetail(error, "机器人配置读取失败。")) } finally { this.loading = false }
     },
     async loadStatus() { this.statusLoading = true; try { const response = await this.getRequest(`${this.$root.prefix}/protocol/status`, {}, { suppressErrorToast: true }); if (response && response.suc) this.status = response.data } finally { this.statusLoading = false } },
+    protocolSnapshot() { return JSON.stringify({ onebotToken: this.onebotToken, clearOnebotToken: this.clearOnebotToken, qq: { ...this.qqForm, bots: this.qqForm.bots.map(({ probing, removing, probeResult, probeError, localKey, ...bot }) => bot) } }) },
+    updateDirtyState() { if (this.originalProtocol) setDirtyState("protocol-configuration", this.protocolSnapshot() !== this.originalProtocol) },
     clearRegistrationTimer() { if (this.registrationTimer) window.clearTimeout(this.registrationTimer); this.registrationTimer = null },
     async startRegistration() {
       this.clearRegistrationTimer(); if (this.registration.registrationId) await this.cancelRegistrationSession(); this.registration = { ...emptyRegistration(), visible: true, starting: true, status: "starting" }
@@ -176,7 +185,7 @@ export default {
     async pollRegistration() {
       if (!this.registration.registrationId || this.registration.status !== "pending") return
       if (Date.now() >= this.registration.expiresAt) { this.registration.status = "expired"; return }
-      try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/registration/${encodeURIComponent(this.registration.registrationId)}/poll`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); if (response.data.status === "expired") { this.registration.status = "expired"; return } if (response.data.status !== "completed") { this.scheduleRegistrationPoll((response.data.retry_after || this.registration.interval) * 1000); return } this.registration = { ...this.registration, status: "completed", registrationId: "", qrDataUrl: "", qrUrl: "", bot: response.data.bot || {}, restartAvailable: Boolean(response.data.restart_available), accessUrls: response.data.access_urls || [], accessTargets: response.data.access_targets || [] }; this.configuration.revision = response.data.revision; this.$message.success(`QQ 官方机器人 ${response.data.bot.username || response.data.bot.app_id} 已接入`); await this.loadConfiguration() }
+      try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/registration/${encodeURIComponent(this.registration.registrationId)}/poll`, {}, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); if (response.data.status === "expired") { this.registration.status = "expired"; return } if (response.data.status !== "completed") { this.scheduleRegistrationPoll((response.data.retry_after || this.registration.interval) * 1000); return } this.registration = { ...this.registration, status: "completed", registrationId: "", qrDataUrl: "", qrUrl: "", bot: response.data.bot || {}, restartAvailable: Boolean(response.data.restart_available), accessUrls: response.data.access_urls || [], accessTargets: response.data.access_targets || [] }; this.configuration.revision = response.data.revision; notifyRestartStatusChanged(); await this.loadConfiguration() }
       catch (error) { this.registration.status = "error"; this.registration.error = apiErrorDetail(error, "扫码状态查询失败，请重试。") }
     },
     async cancelRegistrationSession() { const id = this.registration.registrationId; this.registration.registrationId = ""; if (!id) return; try { await this.deleteRequest(`${this.$root.prefix}/protocol/qq/registration/${encodeURIComponent(id)}`, {}, { suppressErrorToast: true }) } catch (error) { /* 服务端会自动清理过期会话。 */ } },
@@ -194,10 +203,12 @@ export default {
         this.configuration.revision = response.data.revision
         this.qqForm.bots.splice(index, 1)
         this.qqForm.enabled = response.data.qq_enabled
-        this.$message.success(response.info)
-        if (response.data.restart_available) {
-          await this.confirmRestart(response.data.access_urls || [], response.data.access_targets || [], "机器人已移除，需要重启后停止当前连接。")
-        } else this.$message.warning("配置已保存，请手动重启真寻后生效。")
+        this.originalProtocol = this.protocolSnapshot(); clearDirtyState("protocol-configuration")
+        await handleApplyResult(this, response, {
+          restartPrompt: "机器人已移除，需要重启后停止当前连接。",
+          restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          returnRoute: "/protocol",
+        })
       } catch (error) { this.$message.error(apiErrorDetail(error, "机器人移除失败。")) }
       finally { bot.removing = false }
     },
@@ -209,15 +220,8 @@ export default {
     async probeBot(bot) { bot.probing = true; bot.probeResult = ""; bot.probeError = null; try { const response = await this.postRequest(`${this.$root.prefix}/protocol/qq/probe`, { id: bot.id, token: bot.token || null, secret: bot.secret || null }, { suppressErrorToast: true }); if (!response || !response.suc) throw new Error(response && response.info); bot.probeResult = response.data.username || response.data.bot_id || "凭据有效" } catch (error) { bot.probeError = apiErrorDiagnostic(error, "凭据验证失败。") } finally { bot.probing = false } },
     async saveConfiguration() {
       this.saving = true
-      try { const response = await this.putRequest(`${this.$root.prefix}/protocol/configuration`, { expected_revision: this.configuration.revision, onebot_access_token: this.onebotToken || null, clear_onebot_access_token: this.clearOnebotToken, qq_enabled: this.qqForm.enabled, qq_bots: this.qqForm.bots.map((bot) => ({ id: bot.id, token: bot.token || null, secret: bot.secret || null, use_websocket: bot.use_websocket })), qq_webhook_mode: this.qqForm.webhook_mode, qq_webhook_public_base_url: this.qqForm.public_base_url, qq_webhook_listen_host: this.qqForm.listen_host, qq_webhook_listen_port: this.qqForm.listen_port, qq_webhook_tls_certfile: this.qqForm.tls_certfile, qq_webhook_tls_keyfile: this.qqForm.tls_keyfile }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration.revision = response.data.revision; this.$message.success(response.info); if (response.data.restart_available) await this.confirmRestart([], [], "协议配置已保存，需要重启后生效。") ; else this.$message.warning("配置已保存，请手动重启真寻后生效。") }
+      try { const response = await this.putRequest(`${this.$root.prefix}/protocol/configuration`, { expected_revision: this.configuration.revision, onebot_access_token: this.onebotToken || null, clear_onebot_access_token: this.clearOnebotToken, qq_enabled: this.qqForm.enabled, qq_bots: this.qqForm.bots.map((bot) => ({ id: bot.id, token: bot.token || null, secret: bot.secret || null, use_websocket: bot.use_websocket })), qq_webhook_mode: this.qqForm.webhook_mode, qq_webhook_public_base_url: this.qqForm.public_base_url, qq_webhook_listen_host: this.qqForm.listen_host, qq_webhook_listen_port: this.qqForm.listen_port, qq_webhook_tls_certfile: this.qqForm.tls_certfile, qq_webhook_tls_keyfile: this.qqForm.tls_keyfile }); if (!response || !response.suc) throw new Error(response && response.info); this.configuration.revision = response.data.revision; this.originalProtocol = this.protocolSnapshot(); clearDirtyState("protocol-configuration"); await handleApplyResult(this, response, { restartPrompt: "协议配置已保存，需要重启后生效。", restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}), returnRoute: "/protocol", recoveryMessage: "QQ 官方机器人将在新进程中建立连接。" }) }
       catch (error) { this.$message.error(apiErrorDetail(error, "机器人配置保存失败。")) } finally { this.saving = false }
-    },
-    async confirmRestart(accessUrls = [], accessTargets = [], prompt = "配置已保存，需要重启后生效。") {
-      return confirmAndRestart(this, {
-        prompt,
-        request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
-        recovery: { policy: "preserve", returnRoute: "/protocol", message: "QQ 官方机器人将在新进程中建立连接。", accessUrls, accessTargets },
-      })
     },
     async restartRegistration() {
       if (!this.registration.restartAvailable) return

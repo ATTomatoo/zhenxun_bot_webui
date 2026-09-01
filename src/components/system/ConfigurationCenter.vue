@@ -12,12 +12,14 @@
       <el-tab-pane label="环境配置" name="env">
         <el-form label-position="top" class="env-form">
           <el-form-item v-for="field in envFieldDefinitions" :key="field.key" :label="field.label">
-            <el-input v-model="envFields[field.key]" :placeholder="field.placeholder" />
+            <el-switch v-if="field.type === 'switch'" v-model="envFields[field.key]" :disabled="fieldDisabled(field)" />
+            <el-input-number v-else-if="field.type === 'number'" v-model="envFields[field.key]" :min="1" :max="65535" controls-position="right" class="full-control" :disabled="fieldDisabled(field)" />
+            <el-input v-else v-model="envFields[field.key]" :placeholder="field.placeholder" :disabled="fieldDisabled(field)" />
             <div class="field-help">{{ field.help }}</div>
           </el-form-item>
         </el-form>
         <div class="action-bar">
-          <span>{{ launcherManaged ? "保存后可由 launcher 自动重启" : "保存后需要手动重启" }}</span>
+          <span>{{ launcherManaged ? "保存后可确认由 launcher 重启" : "保存后需要手动重启" }}</span>
           <el-button type="primary" :loading="saving === 'env'" @click="saveEnv">保存环境配置</el-button>
         </div>
       </el-tab-pane>
@@ -33,14 +35,17 @@
           </aside>
           <section v-if="currentGroup" class="current-config-group">
             <header class="group-heading"><div><h3>{{ currentGroup.name }}</h3><p>{{ currentGroup.module }} · {{ currentGroup.fields.length }} 个配置项</p></div><el-button size="small" @click="resetCurrentGroup">恢复本组默认值</el-button></header>
-            <SchemaForm :key="selectedGroup" :value="currentGroupValue" :schema="currentGroupSchema" :field-ui="currentGroupUi" :issues="pluginIssues" @input="updateCurrentGroup" @validity-change="pluginInvalidPaths = $event" />
-            <div v-for="field in currentSensitiveFields" :key="field.key" class="sensitive-placeholder"><i class="el-icon-lock"></i><span><strong>{{ (field.ui && field.ui.label) || field.key }}</strong>为敏感字段，请在高级原文中修改。</span></div>
+            <div class="config-form-scroll">
+              <SchemaForm :key="selectedGroup" :value="currentGroupValue" :schema="currentGroupSchema" :field-ui="currentGroupUi" :issues="pluginIssues" @input="updateCurrentGroup" @validity-change="pluginInvalidPaths = $event" />
+              <div v-for="field in currentSensitiveFields" :key="field.key" class="sensitive-placeholder"><i class="el-icon-lock"></i><span><strong>{{ (field.ui && field.ui.label) || field.key }}</strong>为敏感字段，请在高级原文中修改。</span></div>
+            </div>
+            <div class="action-bar config-action-bar">
+              <span>{{ Object.keys(simpleChanges).length ? `${Object.keys(simpleChanges).length} 个配置组有未保存修改` : "未知配置组和字段会原样保留" }}</span>
+              <el-button icon="el-icon-refresh-left" :disabled="!simpleChanges[currentGroup.module]" @click="resetCurrentGroup">恢复默认值</el-button>
+              <el-button type="primary" icon="el-icon-check" :loading="saving === 'simple'" :disabled="pluginInvalidPaths.length > 0 || !Object.keys(simpleChanges).length" @click="saveSimple">保存配置</el-button>
+            </div>
           </section>
           <section v-else class="current-config-empty"><i class="el-icon-setting"></i><p>选择一个配置组开始编辑</p></section>
-        </div>
-        <div class="action-bar">
-          <span>{{ Object.keys(simpleChanges).length ? `${Object.keys(simpleChanges).length} 个配置组有未保存修改` : "未知配置组和字段会原样保留" }}</span>
-          <el-button type="primary" :loading="saving === 'simple'" :disabled="pluginInvalidPaths.length > 0" @click="saveSimple">保存并热加载</el-button>
         </div>
       </el-tab-pane>
 
@@ -74,9 +79,8 @@
 
 <script>
 import SchemaForm from "@/components/config/SchemaForm.vue"
-import { buildRestartTargets } from "@/utils/restart-targets"
 import { apiErrorDetail, apiErrorIssues } from "@/utils/api-error"
-import { confirmAndRestart } from "@/utils/restart-flow"
+import { handleApplyResult } from "@/utils/apply-result"
 import { setDirtyState, clearDirtyState } from "@/utils/dirty-state"
 
 export default {
@@ -85,11 +89,15 @@ export default {
   data() {
     return {
       loading: false, saving: "", validating: false, section: "env", envRevision: "", simpleRevision: "", envFields: {}, originalEnvFields: {}, groups: [], simpleChanges: {}, groupSearch: "", selectedGroup: "", launcherManaged: false,
-      rawFile: "env", rawContent: "", rawRevision: "", rawError: "", rawIssues: [], rawLoaded: {}, pluginInvalidPaths: [], pluginIssues: [],
-      restartTargets: [],
+      rawFile: "env", rawContent: "", rawOriginal: "", rawRevision: "", rawError: "", rawIssues: [], rawLoaded: {}, pluginInvalidPaths: [], pluginIssues: [],
       envFieldDefinitions: [
         { key: "HOST", label: "监听地址", placeholder: "0.0.0.0", help: "0.0.0.0 允许局域网访问，127.0.0.1 仅本机访问。" },
-        { key: "PORT", label: "监听端口", placeholder: "8080", help: "WebUI 与适配器共享的本地服务端口。" },
+        { key: "PORT", label: "监听端口", type: "number", placeholder: "8080", help: "WebUI 与适配器共享的本地服务端口；启用 HTTPS 后该端口提供 HTTPS。" },
+        { key: "WEBUI_HTTPS_ENABLED", label: "启用 HTTPS", type: "switch", help: "使用用户提供的可信 PEM 证书和私钥，需要重启生效。" },
+        { key: "WEBUI_TLS_CERTFILE", label: "TLS 证书路径", placeholder: "C:\\certs\\fullchain.pem", dependsOn: "WEBUI_HTTPS_ENABLED", help: "证书 PEM 的绝对路径，保存时会检查有效期及密钥匹配。" },
+        { key: "WEBUI_TLS_KEYFILE", label: "TLS 私钥路径", placeholder: "C:\\certs\\privkey.pem", dependsOn: "WEBUI_HTTPS_ENABLED", help: "未加密私钥 PEM 的绝对路径。" },
+        { key: "WEBUI_HTTP_REDIRECT_ENABLED", label: "HTTP 自动跳转 HTTPS", type: "switch", dependsOn: "WEBUI_HTTPS_ENABLED", launcherOnly: true, help: "由 launcher 启动独立 HTTP 服务并使用 308 保留原路径跳转。" },
+        { key: "WEBUI_HTTP_REDIRECT_PORT", label: "HTTP 跳转端口", type: "number", dependsOn: "WEBUI_HTTP_REDIRECT_ENABLED", launcherOnly: true, placeholder: "80", help: "必须与 HTTPS 端口及 QQ Webhook HTTPS 端口不同。" },
         { key: "LOG_LEVEL", label: "日志等级", placeholder: "INFO", help: "常用值为 DEBUG、INFO、WARNING。" },
         { key: "SYSTEM_PROXY", label: "系统代理", placeholder: "http://127.0.0.1:7890", help: "留空表示不使用代理。" },
         { key: "NICKNAME", label: "机器人昵称", placeholder: "[\"真寻\"]", help: "使用 dotenv 支持的列表格式。" },
@@ -126,8 +134,17 @@ export default {
     currentGroupUi() { return Object.fromEntries(this.editableCurrentFields.map((field) => [field.key, { label: field.ui?.label || field.key, ...(field.ui || {}), description: field.help }])) },
   },
   mounted() { this.loadSummary() },
-  beforeDestroy() { clearDirtyState("plugin-configuration") },
+  beforeDestroy() { clearDirtyState("plugin-configuration"); clearDirtyState("environment-configuration"); clearDirtyState("raw-configuration") },
   methods: {
+    normalizedEnvFields(fields) {
+      const result = { ...fields }
+      this.envFieldDefinitions.forEach((field) => {
+        if (field.type === "switch") result[field.key] = [true, "true", "1", "yes", "on"].includes(typeof result[field.key] === "string" ? result[field.key].toLowerCase() : result[field.key])
+        if (field.type === "number") result[field.key] = Number(result[field.key] || (field.key === "WEBUI_HTTP_REDIRECT_PORT" ? 80 : 8080))
+      })
+      return result
+    },
+    fieldDisabled(field) { return Boolean((field.dependsOn && !this.envFields[field.dependsOn]) || (field.launcherOnly && !this.launcherManaged && !(field.type === "switch" && this.envFields[field.key]))) },
     normalizeGroups(groups) {
       return (groups || []).filter((group) => group.module !== "AI").map((group) => ({ ...group, fields: group.fields.map((field) => ({ ...field })) }))
     },
@@ -137,8 +154,8 @@ export default {
         const response = await this.getRequest(`${this.$root.prefix}/system/configuration/summary`)
         if (!response.suc) throw new Error(response.info)
         this.envRevision = response.data.env.revision
-        this.envFields = { ...response.data.env.fields }
-        this.originalEnvFields = { ...response.data.env.fields }
+        this.envFields = this.normalizedEnvFields(response.data.env.fields)
+        this.originalEnvFields = this.normalizedEnvFields(response.data.env.fields)
         this.simpleRevision = response.data.simple.revision
         this.groups = this.normalizeGroups(response.data.simple.groups)
         if (!this.groups.some((group) => group.module === this.selectedGroup)) this.selectedGroup = this.groups[0]?.module || ""
@@ -180,9 +197,11 @@ export default {
         if (!response.suc) throw new Error(response.info)
         this.envRevision = response.data.revision
         this.originalEnvFields = { ...this.envFields }
-        this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart(response.data.access_urls || [])
-        else this.$message.warning("配置已保存，请手动重启真寻后生效。")
+        clearDirtyState("environment-configuration")
+        await handleApplyResult(this, response, {
+          restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          returnRoute: "/system",
+        })
       } catch (error) { this.$message.error(apiErrorDetail(error, "保存失败")) }
       finally { this.saving = "" }
     },
@@ -192,9 +211,11 @@ export default {
       try {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/simple`, { expected_revision: this.simpleRevision, fields: this.simpleChanges })
         if (!response.suc) throw new Error(response.info)
-        this.simpleRevision = response.data.revision; this.simpleChanges = {}; clearDirtyState("plugin-configuration"); this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart(response.data.access_urls || [], { preserveOrigin: true })
-        else if (response.data.restart_required) this.$message.warning("配置已保存，请手动重启真寻后生效。")
+        this.simpleRevision = response.data.revision; this.simpleChanges = {}; clearDirtyState("plugin-configuration")
+        await handleApplyResult(this, response, {
+          restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          returnRoute: "/system",
+        })
       } catch (error) { this.pluginIssues = apiErrorIssues(error); this.$message.error(apiErrorDetail(error, "保存失败")) }
       finally { this.saving = "" }
     },
@@ -203,7 +224,7 @@ export default {
       try {
         const response = await this.getRequest(`${this.$root.prefix}/system/configuration/files/${file}`, {}, { suppressErrorToast: true })
         if (!response.suc) throw new Error(response.info)
-        this.rawContent = response.data.content; this.rawRevision = response.data.revision; this.$set(this.rawLoaded, file, true)
+        this.rawContent = response.data.content; this.rawOriginal = response.data.content; this.rawRevision = response.data.revision; this.$set(this.rawLoaded, file, true); clearDirtyState("raw-configuration")
       } catch (error) { this.rawError = apiErrorDetail(error, "配置文件读取失败。"); this.$set(this.rawLoaded, file, false) }
     },
     async validateRaw() {
@@ -222,41 +243,29 @@ export default {
       try {
         const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/${this.rawFile}`, { expected_revision: this.rawRevision, content: this.rawContent })
         if (!response.suc) throw new Error(response.info)
-        this.rawRevision = response.data.revision; this.$message.success(response.info)
-        if (response.data.restart_available) await this.restart(response.data.access_urls || [], { preserveOrigin: this.rawFile === "simple" })
-        else if (response.data.restart_required) this.$message.warning("配置已保存，请手动重启真寻后生效。")
-        else await this.loadSummary()
+        this.rawRevision = response.data.revision; this.rawOriginal = this.rawContent; clearDirtyState("raw-configuration")
+        await handleApplyResult(this, response, {
+          restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          returnRoute: "/system",
+        })
+        if (!response.data.restart_required) await this.loadSummary()
       } catch (error) { this.rawIssues = apiErrorIssues(error); this.rawError = apiErrorDetail(error, "保存失败。"); if (error.response?.status === 409) this.$set(this.rawLoaded, this.rawFile, false) }
       finally { this.saving = "" }
-    },
-    async restart(accessUrls, { preserveOrigin = false } = {}) {
-      const host = String(this.envFields.HOST || "0.0.0.0"); const port = Number(this.envFields.PORT || 8080)
-      const mode = host === "127.0.0.1" ? "local" : host === "0.0.0.0" || host === "::" ? "lan" : "custom"
-      this.restartTargets = buildRestartTargets({ mode, customHost: host, port, accessUrls })
-      return confirmAndRestart(this, {
-        prompt: "配置已保存，需要重启后生效。",
-        request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
-        recovery: {
-          policy: preserveOrigin ? "preserve" : mode === "lan" ? "network" : mode,
-          preferredUrl: preserveOrigin ? window.location.origin : this.restartTargets[0] || "",
-          accessUrls: this.restartTargets,
-          returnRoute: "/system",
-          message: "配置将在新进程中生效。",
-        },
-      })
     },
   },
   watch: {
     section(value) { if (value === "raw" && !this.rawLoaded[this.rawFile]) this.loadRaw(this.rawFile) },
     selectedGroup() { this.pluginInvalidPaths = [] },
+    envFields: { deep: true, handler() { setDirtyState("environment-configuration", Object.keys(this.changedEnvFields()).length > 0) } },
+    rawContent(value) { setDirtyState("raw-configuration", Boolean(this.rawReady && value !== this.rawOriginal)) },
   },
 }
 </script>
 
 <style scoped>
 .configuration-center { min-height: 420px; }.configuration-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }.configuration-toolbar h2 { margin: 0; font-size: 20px; }.configuration-toolbar p { margin: 5px 0 0; color: var(--text-color-secondary); }
-.env-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }.field-help { margin-top: 5px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; }.plugin-config-workbench { display: grid; min-height: 540px; grid-template-columns: 230px minmax(0, 1fr); border: 1px solid var(--border-color); border-radius: 8px; }.config-groups { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 14px; border-right: 1px solid var(--border-color); }.config-groups .el-input { margin-bottom: 8px; }.config-groups button { display: flex; min-height: 54px; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; color: var(--text-color); background: transparent; text-align: left; cursor: pointer; }.config-groups button:hover { background: var(--bg-color-hover); }.config-groups button.active { border-color: var(--primary-color); background: var(--bg-color-hover); }.config-groups button strong, .config-groups button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.config-groups button span { margin-top: 3px; color: var(--text-color-secondary); font-size: 11px; }.current-config-group { min-width: 0; padding: 18px 20px; }.group-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color-light); }.group-heading h3 { margin: 0; font-size: 18px; }.group-heading p { margin: 4px 0 0; color: var(--text-color-secondary); font-size: 12px; }.group-empty, .current-config-empty { color: var(--text-color-secondary); text-align: center; }.group-empty { padding: 24px 4px; }.current-config-empty { display: grid; place-content: center; }.current-config-empty i { font-size: 36px; }.sensitive-placeholder { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px; border: 1px dashed var(--border-color); border-radius: 5px; color: var(--text-color-secondary); }
-.action-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; padding: 12px 0; border-top: 1px solid var(--border-color); background: var(--bg-color-secondary); }.action-bar span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.raw-switch { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 10px; }.raw-editor ::v-deep textarea { font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.55; }.inline-error { margin-top: 8px; color: var(--el-color-danger); }
+.env-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }.field-help { margin-top: 5px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; }.plugin-config-workbench { display: grid; height: clamp(360px, calc(100vh - 370px), 680px); grid-template-columns: 230px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border-color); border-radius: 8px; }.config-groups { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 14px; overflow-y: auto; border-right: 1px solid var(--border-color); }.config-groups .el-input { margin-bottom: 8px; }.config-groups button { display: flex; min-height: 54px; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; color: var(--text-color); background: transparent; text-align: left; cursor: pointer; }.config-groups button:hover { background: var(--bg-color-hover); }.config-groups button.active { border-color: var(--primary-color); background: var(--bg-color-hover); }.config-groups button strong, .config-groups button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.config-groups button span { margin-top: 3px; color: var(--text-color-secondary); font-size: 11px; }.current-config-group { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 18px 20px 0; }.config-form-scroll { min-height: 0; flex: 1; padding-right: 5px; overflow-y: auto; }.group-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color-light); }.group-heading h3 { margin: 0; font-size: 18px; }.group-heading p { margin: 4px 0 0; color: var(--text-color-secondary); font-size: 12px; }.group-empty, .current-config-empty { color: var(--text-color-secondary); text-align: center; }.group-empty { padding: 24px 4px; }.current-config-empty { display: grid; place-content: center; }.current-config-empty i { font-size: 36px; }.sensitive-placeholder { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px; border: 1px dashed var(--border-color); border-radius: 5px; color: var(--text-color-secondary); }
+.action-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; padding: 12px 0; border-top: 1px solid var(--border-color); background: var(--bg-color-secondary); }.config-action-bar { position: static; flex: none; margin-top: 8px; }.action-bar span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.raw-switch { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 10px; }.raw-editor ::v-deep textarea { font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.55; }.inline-error { margin-top: 8px; color: var(--el-color-danger); }
 .validation-issues { margin: 10px 0 0; padding: 10px 14px 10px 34px; border: 1px solid rgba(224,82,96,.35); border-radius: 6px; color: var(--danger-color); background: rgba(224,82,96,.06); }.validation-issues li { margin: 4px 0; line-height: 1.55; }.validation-issues code { margin-right: 8px; }
 @media (max-width: 760px) { .env-form { grid-template-columns: 1fr; }.configuration-toolbar { align-items: flex-start; }.plugin-config-workbench { grid-template-columns: 1fr; }.config-groups { display: grid; max-height: 240px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border-color); }.config-groups .el-input { grid-column: 1 / -1; }.current-config-group { padding: 14px; }.group-heading { align-items: flex-start; flex-direction: column; }.action-bar { flex-wrap: wrap; }.action-bar span { width: 100%; }.raw-switch { gap: 10px; } }
 </style>

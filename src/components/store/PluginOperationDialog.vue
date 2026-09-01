@@ -17,14 +17,21 @@
       </div>
     </div>
     <span v-if="!operation.active" slot="footer">
-      <el-button type="primary" @click="close">完成</el-button>
+      <template v-if="operation.applyMode === 'restart_pending' && operation.restartAvailable">
+        <el-button @click="close">稍后处理</el-button>
+        <el-button type="primary" :loading="restarting" @click="restart">立即重启</el-button>
+      </template>
+      <el-button v-else type="primary" @click="close">完成</el-button>
     </span>
   </el-dialog>
 </template>
 
 <script>
+import { requestRestartWithRecovery } from "@/utils/restart-flow"
+
 export default {
   name: "PluginOperationDialog",
+  data() { return { restarting: false } },
   computed: {
     operation() {
       return this.$store.state.pluginOperation
@@ -37,6 +44,27 @@ export default {
     },
   },
   methods: {
+    async restart() {
+      if (this.restarting) return
+      this.restarting = true
+      try {
+        const started = await requestRestartWithRecovery(this, {
+          request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          recovery: {
+            policy: "preserve",
+            returnRoute: this.$route.path,
+            message: "插件变更将在新进程中生效。",
+            accessUrls: this.operation.accessUrls,
+            accessTargets: this.operation.accessTargets,
+          },
+        })
+        if (started) this.close()
+      } catch (error) {
+        this.$message.error(error.response?.data?.detail || error.message || "重启请求失败。")
+      } finally {
+        this.restarting = false
+      }
+    },
     close(done) {
       if (this.operation.active) return
       this.$store.commit("CLEAR_PLUGIN_OPERATION")
