@@ -1,6 +1,7 @@
 const { execFileSync } = require("child_process")
 const fs = require("fs")
 const path = require("path")
+const { buildRevision } = require("./build-revision")
 
 const root = path.resolve(__dirname, "..")
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
@@ -19,7 +20,7 @@ try {
 const manifest = {
   version: pkg.version,
   commit,
-  revision: `${pkg.version}:${commit}`,
+  revision: buildRevision(pkg.version, commit),
   built_at: new Date().toISOString(),
   api_version: 1,
   source: "official-dist",

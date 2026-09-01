@@ -17,7 +17,11 @@
 
 <script>
 import logoUrl from "@/assets/image/logo.png"
-import { clearCookie, setCookie } from "@/utils/api"
+import {
+  clearCookie,
+  setCookie,
+  syncApiWithBrowserLocation,
+} from "@/utils/api"
 
 const SETUP_TOKEN_KEY = "zhenxunSetupToken"
 const RESTART_RECEIPT_KEY = "zhenxunSetupRestartReceipt"
@@ -34,6 +38,9 @@ export default {
     }
   },
   async mounted() {
+    // Console links are issued by the worker serving this page. A saved API
+    // address may point at an older worker after a port or host migration.
+    syncApiWithBrowserLocation()
     this.connectionCode = String(this.$route.query.code || "")
     try {
       await this.$router.replace({ path: "/connect" })
