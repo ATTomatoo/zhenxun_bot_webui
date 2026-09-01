@@ -100,8 +100,42 @@
       </el-tab-pane>
 
       <el-tab-pane label="模型路由" name="model_groups">
-        <section class="settings-section"><div class="section-title"><div><h2>模型路由组</h2><p>按顺序尝试模型或其他路由组；保存时会检查失效引用和循环依赖。</p></div><el-button size="small" icon="el-icon-plus" @click="addGroup">添加路由组</el-button></div>
-          <div v-for="(group, index) in groupRows" :key="group.clientId" class="group-row"><el-form-item class="group-name-field" :error="groupNameErrors[index]"><el-input v-model="group.name" placeholder="路由组名称（必填）" @input="markGroupsDirty" /></el-form-item><el-select v-model="group.targets" multiple filterable allow-create default-first-option placeholder="按顺序选择模型或路由组" @change="markGroupsDirty"><el-option v-for="target in routeTargets" :key="target" :label="target" :value="target" /></el-select><el-button type="text" icon="el-icon-delete" class="danger-text" @click="removeGroup(index)">删除</el-button></div>
+        <section class="settings-section route-section">
+          <div class="section-title"><div><h2>模型路由组</h2><p>按主模型和后备顺序尝试；模型与路由组引用会分别校验。</p></div><el-button size="small" icon="el-icon-plus" @click="addGroup">添加路由组</el-button></div>
+          <div class="route-workbench">
+            <aside class="route-sidebar">
+              <el-input v-model="routeSearch" size="small" clearable prefix-icon="el-icon-search" placeholder="搜索路由组" />
+              <button v-for="group in filteredRouteGroups" :key="group.clientId" :class="{ active: selectedRouteGroupId === group.clientId }" @click="selectedRouteGroupId = group.clientId">
+                <span><strong>{{ group.name || "未命名路由组" }}</strong><small>{{ group.targets.length }} 个目标</small></span>
+                <i v-if="groupIssue(group)" class="el-icon-warning-outline"></i>
+              </button>
+              <div v-if="!filteredRouteGroups.length" class="empty-copy">暂无路由组</div>
+            </aside>
+            <main v-if="selectedRouteGroup" class="route-editor">
+              <div class="route-editor-heading">
+                <div class="route-name-field">
+                  <label for="route-group-name">路由组名称</label>
+                  <el-input id="route-group-name" v-model="selectedRouteGroup.name" placeholder="例如：主对话模型" @input="markGroupsDirty" />
+                  <div v-if="groupIssue(selectedRouteGroup, 'name')" class="route-field-error">{{ groupIssue(selectedRouteGroup, "name") }}</div>
+                </div>
+                <el-button type="text" icon="el-icon-delete" class="danger-text" @click="removeSelectedGroup">删除路由组</el-button>
+              </div>
+              <div class="route-target-list">
+                <div v-for="(target, index) in selectedRouteGroup.targets" :key="target.clientId" class="route-target-row">
+                  <span class="route-order">{{ index === 0 ? "主" : `后备 ${index}` }}</span>
+                  <el-select v-model="target.kind" aria-label="目标类型" @change="changeTargetKind(target)"><el-option label="模型" value="model" /><el-option label="路由组" value="group" /></el-select>
+                  <el-select v-model="target.value" filterable class="full-control" :placeholder="target.kind === 'model' ? '选择模型' : '选择路由组'" @change="markGroupsDirty">
+                    <el-option v-for="option in targetOptions(target.kind, selectedRouteGroup)" :key="option.value" :label="option.label" :value="option.value"><span>{{ option.label }}</span><el-tag v-if="option.tag" size="mini" class="route-option-tag">{{ option.tag }}</el-tag></el-option>
+                  </el-select>
+                  <div class="route-target-actions"><el-tooltip content="上移" placement="top"><span><el-button icon="el-icon-top" circle size="mini" :disabled="index === 0" @click="moveTarget(index, -1)" /></span></el-tooltip><el-tooltip content="下移" placement="top"><span><el-button icon="el-icon-bottom" circle size="mini" :disabled="index === selectedRouteGroup.targets.length - 1" @click="moveTarget(index, 1)" /></span></el-tooltip><el-tooltip content="删除" placement="top"><el-button icon="el-icon-delete" circle size="mini" class="danger-text" @click="removeTarget(index)" /></el-tooltip></div>
+                </div>
+                <div v-if="!selectedRouteGroup.targets.length" class="route-empty">尚未配置目标。至少添加一个主模型或路由组。</div>
+              </div>
+              <el-button icon="el-icon-plus" class="add-route-target" @click="addTarget">添加后备目标</el-button>
+              <el-alert v-if="routingIssues.length" type="error" :closable="false" show-icon class="route-issues"><div v-for="issue in routingIssues" :key="`${issue.code}-${issue.path}`">{{ issue.message }}</div></el-alert>
+            </main>
+            <main v-else class="provider-empty"><i class="el-icon-guide"></i><p>添加或选择一个路由组</p></main>
+          </div>
         </section><SectionAction :dirty="isSectionDirty('model_groups')" :saving="saving === 'model_groups'" :invalid="sectionInvalid('model_groups') || hasGroupErrors" effect="保存后立即热加载" @reset="resetSection('model_groups')" @save="saveGroups" />
       </el-tab-pane>
 
@@ -133,6 +167,7 @@
 import SchemaForm from "@/components/config/SchemaForm.vue"
 import StoreTemplate from "@/components/store/StoreTemplate.vue"
 import { apiErrorDetail, apiErrorIssues } from "@/utils/api-error"
+import { handleApplyResult } from "@/utils/apply-result"
 import { setDirtyState, clearDirtyState } from "@/utils/dirty-state"
 
 const clone = (value) => JSON.parse(JSON.stringify(value ?? null))
@@ -156,7 +191,7 @@ export default {
   data() {
     return {
       loading: false, loadError: "", saving: "", activeSection: "providers", revision: "", schema: {}, apiTypes: [], defaultApiBases: {}, discoveryApiTypes: [], effects: {}, runtime: {}, providers: [], validationIssues: [], operationIssues: [], selectedProviderName: "", providerDraft: null,
-      providerSearch: "", providerDirty: false, modelsDirty: false, modelSearch: "", sectionDrafts: { default_models: {}, model_groups: {}, context: {}, agent: {}, sandbox: {}, advanced: {} }, originalSections: {}, dirtySections: {}, invalidSections: {}, groupRows: [],
+      providerSearch: "", providerDirty: false, modelsDirty: false, modelSearch: "", sectionDrafts: { default_models: {}, model_groups: {}, context: {}, agent: {}, sandbox: {}, advanced: {} }, originalSections: {}, dirtySections: {}, invalidSections: {}, groupRows: [], routeSearch: "", selectedRouteGroupId: "", routingIssues: [],
       discovering: false, discoveryDialog: false, discoveredModels: [], selectedDiscovered: [], discoverySearch: "", modelDialog: false, modelDraft: emptyModel(), modelEditIndex: null,
       defaultTasks: [{ key: "chat", label: "对话" }, { key: "embedding", label: "向量嵌入" }, { key: "tts", label: "语音合成" }, { key: "image", label: "图像生成" }, { key: "rerank", label: "文本重排" }],
       schemaTabs: [
@@ -171,16 +206,17 @@ export default {
     dirtyCount() { return Number(this.providerDirty) + Number(this.modelsDirty) + Object.values(this.dirtySections).filter(Boolean).length },
     filteredProviders() { const key = this.providerSearch.trim().toLowerCase(); return this.providers.filter((item) => `${item.name} ${item.api_type}`.toLowerCase().includes(key)) },
     filteredModels() { const key = this.modelSearch.trim().toLowerCase(); return (this.providerDraft?.models || []).filter((item) => item.model_name.toLowerCase().includes(key)) },
-    groupNames() { return this.groupRows.map((item) => item.name).filter(Boolean) },
+    groupNames() { return this.groupRows.map((item) => item.name.trim()).filter(Boolean) },
     allModels() { return this.providers.flatMap((provider) => provider.models.map((model) => ({ ...model, provider: provider.name, fullName: `${provider.name}/${model.model_name}` }))) },
-    routeTargets() { return [...this.allModels.map((item) => item.fullName), ...this.groupNames] },
+    filteredRouteGroups() { const key = this.routeSearch.trim().toLowerCase(); return this.groupRows.filter((item) => !key || item.name.toLowerCase().includes(key)) },
+    selectedRouteGroup() { return this.groupRows.find((item) => item.clientId === this.selectedRouteGroupId) || null },
     filteredDiscovered() { const key = this.discoverySearch.trim().toLowerCase(); return this.discoveredModels.filter((item) => item.toLowerCase().includes(key)) },
     providerDiscoverySupported() { return Boolean(this.providerDraft && this.discoveryApiTypes.includes(this.providerDraft.api_type)) },
     groupNameErrors() {
       const counts = this.groupRows.reduce((result, row) => { const name = row.name.trim(); if (name) result[name] = (result[name] || 0) + 1; return result }, {})
       return this.groupRows.map((row) => !row.name.trim() ? "请填写路由组名称。" : counts[row.name.trim()] > 1 ? "路由组名称不能重复。" : "")
     },
-    hasGroupErrors() { return this.groupNameErrors.some(Boolean) },
+    hasGroupErrors() { return this.groupNameErrors.some(Boolean) || this.groupRows.some((group) => Boolean(this.groupIssue(group))) },
   },
   mounted() { this.loadConfiguration() },
   beforeDestroy() { clearDirtyState("ai-configuration") },
@@ -198,14 +234,14 @@ export default {
     },
     applyConfiguration(data, preferredName = "") {
       this.revision = data.revision; this.schema = data.schema || {}; this.apiTypes = data.api_types || []; this.defaultApiBases = data.default_api_bases || {}; this.discoveryApiTypes = data.discovery_api_types || []; this.effects = data.effects || {}; this.runtime = data.runtime || {}; this.providers = clone(data.providers || []); this.validationIssues = data.validation_issues || []; this.operationIssues = []
-      this.originalSections = clone(data.sections || {}); this.sectionDrafts = clone(data.sections || {}); this.dirtySections = {}; this.invalidSections = {}; this.groupRows = this.groupsToRows(this.sectionDrafts.model_groups)
+      this.originalSections = clone(data.sections || {}); this.sectionDrafts = clone(data.sections || {}); this.dirtySections = {}; this.invalidSections = {}; this.groupRows = this.groupsToRows(this.sectionDrafts.model_groups); this.selectedRouteGroupId = this.groupRows.some((item) => item.clientId === this.selectedRouteGroupId) ? this.selectedRouteGroupId : this.groupRows[0]?.clientId || ""; this.routingIssues = []
       const target = preferredName || this.selectedProviderName; this.selectedProviderName = this.providers.some((item) => item.name === target) ? target : this.providers[0]?.name || ""
       this.resetProviderDraft(); this.providerDirty = false; this.modelsDirty = false; this.syncDirty()
     },
     resetProviderDraft() { const provider = this.providers.find((item) => item.name === this.selectedProviderName); this.providerDraft = provider ? { ...clone(provider), api_key_slots: provider.api_key_slots.map((slot) => ({ ...slot, value: "", clientId: uid() })), isNew: false } : null },
     async selectProvider(name) { if ((this.providerDirty || this.modelsDirty) && !(await this.confirmDiscard())) return; this.selectedProviderName = name; this.providerDirty = false; this.modelsDirty = false; this.resetProviderDraft(); this.syncDirty() },
     async confirmDiscard() { try { await this.$confirm("当前 AI 配置有尚未保存的修改。", "放弃修改？", { confirmButtonText: "放弃修改", cancelButtonText: "继续编辑", type: "warning" }); return true } catch (_) { return false } },
-    createProvider() { this.selectedProviderName = ""; this.providerDraft = { name: "", api_type: "openai", api_base: "", timeout: 180, temperature: null, max_output_tokens: null, api_key_slots: [{ existing_index: null, value: "", clientId: uid() }], models: [], discovery_supported: true, isNew: true }; this.providerDirty = true; this.modelsDirty = false; this.syncDirty() },
+    async createProvider() { if ((this.providerDirty || this.modelsDirty) && !(await this.confirmDiscard())) return; this.selectedProviderName = ""; this.providerDraft = { name: "", api_type: "openai", api_base: "", timeout: 180, temperature: null, max_output_tokens: null, api_key_slots: [{ existing_index: null, value: "", clientId: uid() }], models: [], discovery_supported: true, isNew: true }; this.providerDirty = true; this.modelsDirty = false; this.syncDirty() },
     markProviderDirty() { this.providerDirty = true; this.syncDirty() },
     handleApiTypeChange(value) { if (!this.providerDraft.api_base && this.defaultApiBases[value]) this.providerDraft.api_base = this.defaultApiBases[value]; this.markProviderDirty() },
     addKey() { this.providerDraft.api_key_slots.push({ existing_index: null, value: "", clientId: uid() }); this.markProviderDirty() },
@@ -217,13 +253,13 @@ export default {
         const path = this.providerDraft.isNew ? "/ai/providers" : `/ai/providers/${encodeURIComponent(this.selectedProviderName)}`
         const response = this.providerDraft.isNew ? await this.postRequest(`${this.$root.prefix}${path}`, this.providerPayload()) : await this.putRequest(`${this.$root.prefix}${path}`, this.providerPayload())
         if (!response.suc) throw new Error(response.info)
-        const name = this.providerDraft.name.trim(); this.applyConfiguration(response.data, name); this.$message.success(response.info)
+        const name = this.providerDraft.name.trim(); this.applyConfiguration(response.data, name); await this.handleAiApply(response)
       } catch (error) { this.captureOperationError(error, "服务商保存失败。") }
       finally { this.saving = "" }
     },
     async removeProvider() {
       try { await this.$confirm(`删除 ${this.providerDraft.name} 后，引用该服务商的默认模型和路由必须先调整。`, "删除服务商？", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }) } catch (_) { return }
-      try { const response = await this.deleteRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}?expected_revision=${encodeURIComponent(this.revision)}`); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data); this.$message.success(response.info) } catch (error) { this.captureOperationError(error, "服务商删除失败。") }
+      try { const response = await this.deleteRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}?expected_revision=${encodeURIComponent(this.revision)}`); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data); await this.handleAiApply(response) } catch (error) { this.captureOperationError(error, "服务商删除失败。") }
     },
     async discoverModels() {
       this.discovering = true
@@ -240,7 +276,7 @@ export default {
     confirmModel() { if (!this.modelDraft.model_name.trim()) return this.$message.warning("请填写模型名称。"); const value = { ...this.modelDraft, model_name: this.modelDraft.model_name.trim() }; delete value.capabilities; if (this.modelEditIndex == null) this.providerDraft.models.push(value); else this.providerDraft.models.splice(this.modelEditIndex, 1, value); this.modelsDirty = true; this.modelDialog = false; this.syncDirty() },
     modelIndex(model) { return this.providerDraft.models.findIndex((item) => item === model || item.model_name === model.model_name) },
     deleteModel(model) { const actual = this.modelIndex(model); if (actual < 0) return; this.providerDraft.models.splice(actual, 1); this.modelsDirty = true; this.syncDirty() },
-    async saveModels() { this.saving = "models"; try { const models = this.providerDraft.models.map(({ capabilities, ...model }) => model); const response = await this.putRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}/models`, { expected_revision: this.revision, models }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); this.$message.success(response.info) } catch (error) { this.captureOperationError(error, "模型列表保存失败。") } finally { this.saving = "" } },
+    async saveModels() { this.saving = "models"; try { const models = this.providerDraft.models.map(({ capabilities, ...model }) => model); const response = await this.putRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}/models`, { expected_revision: this.revision, models }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); await this.handleAiApply(response) } catch (error) { this.captureOperationError(error, "模型列表保存失败。") } finally { this.saving = "" } },
     capabilityTags(model) { const caps = model.capabilities || {}; const result = []; if (caps.is_embedding_model) result.push("Embedding"); if (caps.is_rerank_model) result.push("Rerank"); if ((caps.output_modalities || []).includes("image")) result.push("图像"); if ((caps.output_modalities || []).includes("audio")) result.push("语音"); if (caps.supports_tool_calling) result.push("工具"); return result.slice(0, 3) },
     modelTask(model) { const caps = model.capabilities || {}; if (caps.is_embedding_model || model.task_type === "embedding") return "embedding"; if (caps.is_rerank_model || model.task_type === "rerank") return "rerank"; if ((caps.output_modalities || []).includes("image") || model.task_type === "image_generation") return "image"; if ((caps.output_modalities || []).includes("audio") || model.task_type === "tts") return "tts"; return "chat" },
     async testModel(model) { const task = this.modelTask(model); try { await this.$confirm(`将对 ${this.selectedProviderName}/${model.model_name} 发起一次最小 ${task} 请求，可能产生费用。`, "确认模型测试", { type: "warning" }) } catch (_) { return } try { const response = await this.postRequest(`${this.$root.prefix}/ai/models/test`, { model: `${this.selectedProviderName}/${model.model_name}`, task, confirmed_paid_request: true }); this.$message.success(`连接成功，延迟 ${response.data.latency_ms} ms`) } catch (error) { this.$message.error(apiErrorDetail(error, "模型测试失败。")) } },
@@ -283,17 +319,50 @@ export default {
       })
     },
     isSectionDirty(name) { return Boolean(this.dirtySections[name]) },
-    resetSection(name) { this.$set(this.sectionDrafts, name, clone(this.originalSections[name])); if (name === "model_groups") this.groupRows = this.groupsToRows(this.sectionDrafts.model_groups); this.$set(this.dirtySections, name, false); this.syncDirty() },
+    resetSection(name) { this.$set(this.sectionDrafts, name, clone(this.originalSections[name])); if (name === "model_groups") { this.groupRows = this.groupsToRows(this.sectionDrafts.model_groups); this.selectedRouteGroupId = this.groupRows[0]?.clientId || ""; this.routingIssues = [] } this.$set(this.dirtySections, name, false); this.syncDirty() },
     setSectionValidity(name, paths) { this.$set(this.invalidSections, name, paths || []) },
     sectionInvalid(name) { return Boolean(this.invalidSections[name]?.length) },
-    async saveSection(name, value = this.sectionDrafts[name]) { if (this.sectionInvalid(name)) return; this.saving = name; try { const response = await this.putRequest(`${this.$root.prefix}/ai/configuration/sections/${name}`, { expected_revision: this.revision, value }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); this.$message.success(response.info) } catch (error) { this.captureOperationError(error, "AI 配置保存失败。") } finally { this.saving = "" } },
-    groupsToRows(groups) { return Object.entries(groups || {}).map(([name, targets]) => ({ name, targets: [...targets], clientId: uid() })) },
-    addGroup() { this.groupRows.push({ name: "", targets: [], clientId: uid() }); this.markGroupsDirty() },
+    async saveSection(name, value = this.sectionDrafts[name]) { if (this.sectionInvalid(name)) return; this.saving = name; try { const response = await this.putRequest(`${this.$root.prefix}/ai/configuration/sections/${name}`, { expected_revision: this.revision, value }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); await this.handleAiApply(response) } catch (error) { this.captureOperationError(error, "AI 配置保存失败。") } finally { this.saving = "" } },
+    groupsToRows(groups) { const names = new Set(Object.keys(groups || {})); return Object.entries(groups || {}).map(([name, targets]) => ({ name, targets: targets.map((value) => ({ kind: names.has(value) ? "group" : "model", value, clientId: uid() })), clientId: uid() })) },
+    addGroup() { const group = { name: "", targets: [], clientId: uid() }; this.groupRows.push(group); this.selectedRouteGroupId = group.clientId; this.markGroupsDirty() },
     removeGroup(index) { this.groupRows.splice(index, 1); this.markGroupsDirty() },
-    markGroupsDirty() { this.$set(this.dirtySections, "model_groups", true); this.syncDirty() },
-    saveGroups() { if (this.hasGroupErrors) { this.$message.warning("请先填写唯一的路由组名称。"); return } this.saveSection("model_groups", this.groupRows.map((item) => ({ name: item.name.trim(), targets: item.targets }))) },
+    removeSelectedGroup() { const index = this.groupRows.findIndex((item) => item.clientId === this.selectedRouteGroupId); if (index < 0) return; this.groupRows.splice(index, 1); this.selectedRouteGroupId = this.groupRows[Math.max(0, index - 1)]?.clientId || ""; this.markGroupsDirty() },
+    markGroupsDirty() { this.routingIssues = []; this.$set(this.dirtySections, "model_groups", true); this.syncDirty() },
+    targetOptions(kind, currentGroup) { if (kind === "group") return this.groupRows.filter((item) => item.clientId !== currentGroup.clientId && item.name.trim()).map((item) => ({ label: item.name.trim(), value: item.name.trim(), tag: "路由组" })); return this.allModels.filter((item) => item.is_available).map((item) => ({ label: item.fullName, value: item.fullName, tag: this.modelTask(item) })) },
+    changeTargetKind(target) { target.value = ""; this.markGroupsDirty() },
+    addTarget() { if (!this.selectedRouteGroup) return; this.selectedRouteGroup.targets.push({ kind: "model", value: "", clientId: uid() }); this.markGroupsDirty() },
+    removeTarget(index) { this.selectedRouteGroup.targets.splice(index, 1); this.markGroupsDirty() },
+    moveTarget(index, direction) { const target = this.selectedRouteGroup.targets.splice(index, 1)[0]; this.selectedRouteGroup.targets.splice(index + direction, 0, target); this.markGroupsDirty() },
+    groupIssue(group, field = "") {
+      const index = this.groupRows.indexOf(group)
+      const nameError = this.groupNameErrors[index]
+      if (field === "name") return nameError
+      if (nameError) return nameError
+      if (!group.targets.length) return "至少需要一个路由目标。"
+      const values = group.targets.map((item) => item.value.trim())
+      if (values.some((value) => !value)) return "请选择完整的路由目标。"
+      if (new Set(values).size !== values.length) return "同一路由组不能重复引用目标。"
+      if (values.includes(group.name.trim())) return "路由组不能引用自身。"
+      const graph = Object.fromEntries(this.groupRows.map((item) => [item.name.trim(), item.targets.filter((target) => target.kind === "group").map((target) => target.value)]))
+      const visit = (name, stack = []) => stack.includes(name) || (graph[name] || []).some((next) => visit(next, [...stack, name]))
+      if (visit(group.name.trim())) return "路由组之间存在循环引用。"
+      return ""
+    },
+    async saveGroups() {
+      if (this.hasGroupErrors) { this.$message.warning("请先修正路由组名称、目标或循环引用。"); return }
+      const value = this.groupRows.map((item) => ({ name: item.name.trim(), targets: item.targets.map((target) => target.value.trim()) }))
+      this.saving = "model_groups"
+      try {
+        const validation = await this.postRequest(`${this.$root.prefix}/ai/configuration/validate-routing`, { value })
+        this.routingIssues = validation.data?.issues || []
+        if (!validation.suc || !validation.data?.valid) { this.$message.warning("模型路由校验未通过。"); return }
+        await this.saveSection("model_groups", value)
+      } catch (error) { this.captureOperationError(error, "模型路由校验失败。") }
+      finally { if (this.saving === "model_groups") this.saving = "" }
+    },
     modelsForTask(task) { return this.allModels.filter((model) => { const caps = model.capabilities || {}; if (!model.is_available) return false; if (task === "embedding") return caps.is_embedding_model || model.task_type === "embedding"; if (task === "rerank") return caps.is_rerank_model || model.task_type === "rerank"; if (task === "image") return (caps.output_modalities || []).includes("image") || model.task_type === "image_generation"; if (task === "tts") return (caps.output_modalities || []).includes("audio") || model.task_type === "tts"; return !caps.is_embedding_model && !caps.is_rerank_model && ((caps.output_modalities || ["text"]).includes("text")) }) },
     captureOperationError(error, fallback) { this.operationIssues = apiErrorIssues(error); this.$message.error(apiErrorDetail(error, fallback)) },
+    handleAiApply(response) { return handleApplyResult(this, response, { restartPrompt: "AI 启动期配置已保存，需要重启后生效。", restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}), returnRoute: "/ai", recoveryMessage: "AI 启动期配置将在新进程中生效。" }) },
     operationError(path) {
       const expected = path.toLowerCase()
       return this.operationIssues.find((issue) => {
@@ -311,6 +380,30 @@ export default {
 @media (max-width: 820px) { .ai-page { padding: 12px; }.page-header, .section-title, .subheading { align-items: flex-start; flex-direction: column; }.header-status { width: 100%; flex-wrap: wrap; }.load-error { min-height: 220px; grid-template-columns: auto minmax(0, 1fr); padding: 20px; }.load-error .el-button { grid-column: 1 / -1; }.provider-workbench { grid-template-columns: 1fr; }.provider-sidebar { border-right: 0; border-bottom: 1px solid var(--border-color); }.provider-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }.provider-main { padding: 16px; }.provider-form, .advanced-grid, .default-grid, .model-form { grid-template-columns: 1fr; }.group-row { grid-template-columns: 1fr auto; }.group-row .el-select { grid-column: 1 / -1; grid-row: 2; }.model-row { align-items: flex-start; flex-direction: column; padding: 10px 0; }.model-actions { align-self: flex-end; }.discovery-list { grid-template-columns: 1fr; } }
 .mobile-provider-select { display: none; width: 100%; margin-top: 10px; }
 .group-name-field { margin-bottom: 0; }
+.route-section { padding: 0; overflow: hidden; }
+.route-section > .section-title { padding: 20px 22px 16px; }
+.route-workbench { display: grid; min-height: 500px; grid-template-columns: 240px minmax(0, 1fr); border-top: 1px solid var(--border-color); }
+.route-sidebar { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 14px; border-right: 1px solid var(--border-color); }
+.route-sidebar .el-input { margin-bottom: 6px; }
+.route-sidebar button { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 6px; color: var(--text-color); background: transparent; text-align: left; cursor: pointer; }
+.route-sidebar button:hover, .route-sidebar button.active { background: var(--bg-color-hover); }
+.route-sidebar button.active { border-color: var(--primary-color); }
+.route-sidebar button span { display: flex; min-width: 0; flex-direction: column; }
+.route-sidebar strong, .route-sidebar small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-sidebar small { margin-top: 4px; color: var(--text-color-secondary); }
+.route-sidebar i { color: var(--warning-color); }
+.route-editor { min-width: 0; padding: 18px 20px; }
+.route-editor-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+.route-name-field label { display: block; margin-bottom: 8px; color: var(--text-color); font-size: 14px; }
+.route-field-error { margin-top: 5px; color: var(--danger-color); font-size: 12px; line-height: 1.4; }
+.route-target-list { margin-top: 12px; border-top: 1px solid var(--border-color-light); }
+.route-target-row { display: grid; min-height: 64px; grid-template-columns: 64px 110px minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color-light); }
+.route-order { color: var(--text-color-secondary); font-size: 12px; }
+.route-target-actions { display: flex; gap: 5px; }
+.route-option-tag { float: right; margin-top: 7px; }
+.route-empty { padding: 38px 12px; color: var(--text-color-secondary); text-align: center; }
+.add-route-target, .route-issues { margin-top: 14px; }
 @media (max-width: 820px) { .mobile-provider-select { display: block; }.provider-list { display: none; } }
+@media (max-width: 820px) { .route-workbench { grid-template-columns: 1fr; }.route-sidebar { border-right: 0; border-bottom: 1px solid var(--border-color); }.route-editor { padding: 16px; }.route-target-row { grid-template-columns: 54px 100px minmax(0, 1fr); padding: 10px 0; }.route-target-actions { grid-column: 2 / -1; justify-content: flex-end; } }
 @media (max-width: 460px) { .provider-list { grid-template-columns: 1fr; }.provider-actions, .models-save, .section-action { align-items: stretch; flex-direction: column; }.section-action span { margin: 0; }.secret-row { grid-template-columns: 1fr; } }
 </style>

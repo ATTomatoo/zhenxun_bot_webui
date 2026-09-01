@@ -5,7 +5,7 @@
         <h1>{{ capability === "ai_chat" ? "AI 聊天插件" : "插件商店" }}</h1>
         <p>{{ capability === "ai_chat" ? "选择并安装适合当前机器人的对话插件" : "浏览、安装和维护真寻插件" }}</p>
       </div>
-      <el-button icon="el-icon-refresh" :loading="loading" @click="loadPlugins">刷新</el-button>
+      <el-button icon="el-icon-refresh" :loading="loading" @click="loadPlugins(true)">检查更新</el-button>
     </header>
 
     <div class="store-toolbar">
@@ -35,13 +35,16 @@
 
     <div v-loading="loading" class="store-content">
       <div v-if="pagedPlugins.length" class="plugin-grid">
-        <article v-for="plugin in pagedPlugins" :key="plugin.id" class="plugin-card">
+        <article v-for="plugin in pagedPlugins" :key="plugin.store_key || plugin.id" class="plugin-card">
           <div class="plugin-card__head">
             <div class="plugin-title">
               <el-tooltip :content="plugin.name" placement="top"><h2>{{ plugin.name }}</h2></el-tooltip>
               <span>{{ plugin.module }}</span>
             </div>
-            <el-tag v-if="plugin.update_available" size="mini" type="warning" effect="plain">可更新</el-tag>
+            <el-tag v-if="plugin.install_state === 'locally_modified'" size="mini" type="warning" effect="plain">本地已修改</el-tag>
+            <el-tag v-else-if="plugin.update_available" size="mini" type="warning" effect="plain">可更新</el-tag>
+            <el-tag v-else-if="plugin.install_state === 'local_ahead'" size="mini" type="info" effect="plain">本地版本较新</el-tag>
+            <el-tag v-else-if="plugin.install_state === 'version_unknown'" size="mini" type="info" effect="plain">版本未知</el-tag>
             <el-tag v-else-if="plugin.installed" size="mini" type="success" effect="plain">已安装</el-tag>
           </div>
           <p class="plugin-description">{{ plugin.description || "暂无简介" }}</p>
@@ -57,7 +60,7 @@
               :type="plugin.reload_support === 'hot_reloadable' ? 'success' : 'info'"
               effect="plain"
             >
-              {{ plugin.reload_support === "hot_reloadable" ? "支持热加载" : "更新需重启" }}
+              {{ reloadLabel(plugin) }}
             </el-tag>
           </div>
           <footer class="plugin-actions">
@@ -66,21 +69,23 @@
               <el-button v-if="repositoryUrl(plugin)" class="icon-action" icon="el-icon-link" circle @click="openRepository(plugin)" />
             </el-tooltip>
             <span class="action-spacer"></span>
+            <el-tooltip v-if="capability === 'ai_chat' && plugin.installed" content="配置插件" placement="top">
+              <el-button class="icon-action" icon="el-icon-setting" circle @click="openPluginConfiguration(plugin)" />
+            </el-tooltip>
             <el-tooltip v-if="plugin.installed && plugin.reload_support === 'hot_reloadable'" content="热重载插件" placement="top">
               <el-button
                 class="icon-action"
                 icon="el-icon-refresh"
                 circle
-                :loading="actionId === plugin.id && actionType === 'reload'"
+                :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'reload'"
                 @click="runAction('reload', plugin)"
               />
             </el-tooltip>
-            <el-button v-if="!plugin.installed" type="primary" size="small" :loading="actionId === plugin.id" @click="runAction('install', plugin)">安装</el-button>
-            <el-button v-else-if="plugin.update_available" type="warning" size="small" :loading="actionId === plugin.id && actionType === 'update'" @click="runAction('update', plugin)">更新</el-button>
-            <el-dropdown v-else trigger="click" @command="runAction($event, plugin)">
+            <el-button v-if="!plugin.installed" type="primary" size="small" :loading="actionId === (plugin.store_key || plugin.id)" @click="runAction('install', plugin)">安装</el-button>
+            <el-button v-if="plugin.installed && plugin.update_available" type="warning" size="small" :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'update'" @click="runAction('update', plugin)">更新插件</el-button>
+            <el-dropdown v-if="plugin.installed" trigger="click" @command="runAction($event, plugin)">
               <el-button size="small">已安装<i class="el-icon-arrow-down el-icon--right" /></el-button>
               <el-dropdown-menu slot="dropdown">
-                <el-dropdown-item command="update">检查更新</el-dropdown-item>
                 <el-dropdown-item command="remove" divided>卸载</el-dropdown-item>
               </el-dropdown-menu>
             </el-dropdown>
@@ -104,18 +109,23 @@
         <span v-else>未提供仓库地址</span>
       </div>
     </el-drawer>
+    <UpdateDialog v-if="configModule" :module="configModule" @close="configModule = ''" />
   </section>
 </template>
 
 <script>
+import UpdateDialog from "@/components/plugin/UpdateDialog.vue"
+import { notifyRestartStatusChanged } from "@/utils/apply-result"
+
 export default {
   name: "StoreTemplate",
+  components: { UpdateDialog },
   props: {
     capability: { type: String, default: "" },
     embedded: { type: Boolean, default: false },
   },
   data() {
-    return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, actionType: "", drawerVisible: false, selectedPlugin: null }
+    return { plugins: [], loading: false, error: "", search: "", statusFilter: "all", typeFilter: "all", sortBy: "default", page: 1, pageSize: 18, actionId: null, actionType: "", drawerVisible: false, selectedPlugin: null, configModule: "" }
   },
   computed: {
     pluginOperation() { return this.$store.state.pluginOperation },
@@ -141,24 +151,47 @@ export default {
     repositoryUrl(plugin) { return plugin.github_url || plugin.ali_url || "" },
     openRepository(plugin) { window.open(this.repositoryUrl(plugin), "_blank", "noopener,noreferrer") },
     showDetails(plugin) { this.selectedPlugin = plugin; this.drawerVisible = true },
+    reloadLabel(plugin) {
+      if (plugin.reload_support === "hot_reloadable") return "支持热加载"
+      if ((plugin.reload_reasons || []).includes("not_loaded")) return "尚未加载"
+      return "变更后需要重启"
+    },
+    async openPluginConfiguration(plugin) {
+      const module = String(plugin.runtime_module || plugin.module).split(".").pop()
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/plugin/get_plugin`, { module })
+        if (!response.suc) throw new Error(response.info || "插件配置读取失败")
+        if (!response.data?.config_list?.length) {
+          this.$message.info("该插件无需额外配置。")
+          return
+        }
+        this.configModule = module
+      } catch (error) {
+        this.$message.error(error.message || "插件配置读取失败")
+      }
+    },
     operationResult(response, fallback) {
       const mode = response.data?.apply_mode
       const labels = {
         hot_reloaded: "运行时已热加载，无需重启。",
         restart_requested: "已请求受控重启，重启完成后生效。",
-        restart_pending: "当前不是 launcher 模式，需要手动重启后生效。",
-        failed: "插件文件已变更，但运行时应用失败，请查看运行状态。",
+        restart_pending: response.data?.restart_available ? "插件文件操作已完成，需要重启后生效。" : "插件文件操作已完成，请手动重启后生效。",
+        failed: response.data?.rolled_back ? "运行时应用失败，插件文件已自动恢复。" : "运行时应用失败，请查看运行状态。",
       }
       const detail = labels[mode]
       return {
-        status: mode === "failed" ? "error" : "success",
+        status: mode === "failed" ? "error" : mode === "restart_pending" ? "pending" : "success",
         message: [fallback, detail].filter(Boolean).join("\n"),
+        applyMode: mode,
+        restartAvailable: Boolean(response.data?.restart_available),
+        accessUrls: response.data?.access_urls || [],
+        accessTargets: response.data?.access_targets || [],
       }
     },
-    async loadPlugins() {
+    async loadPlugins(refresh = false) {
       this.loading = true; this.error = ""
       try {
-        const response = await this.getRequest(`${this.$root.prefix}/store/get_plugin_store`)
+        const response = await this.getRequest(`${this.$root.prefix}/store/get_plugin_store`, { refresh })
         if (!response.suc) throw new Error(response.info || "插件商店加载失败")
         this.plugins = Array.isArray(response.data.plugin_list) ? response.data.plugin_list : []
       } catch (error) {
@@ -174,7 +207,7 @@ export default {
       }
       const confirmed = await this.$cuteConfirm({ title: `${labels[action]}插件`, message: `确认${labels[action]}“${plugin.name}”？`, confirmButtonText: "确认", cancelButtonText: "取消", type: action === "remove" ? "warning" : "info" })
       if (!confirmed) return
-      this.actionId = plugin.id
+      this.actionId = plugin.store_key || plugin.id
       this.actionType = action
       const runningTitles = {
         install: "正在下载并安装插件",
@@ -189,16 +222,23 @@ export default {
         message: "请稍候，切换到其他页面不会中断当前操作。",
       })
       try {
-        const payload = action === "reload" ? { module: plugin.module } : { id: plugin.id }
+        const payload = action === "reload"
+          ? { store_key: plugin.store_key, module: plugin.runtime_module || plugin.module }
+          : { store_key: plugin.store_key, id: plugin.id }
         const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload)
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
         const operation = this.operationResult(response, response.info || `${labels[action]}已完成。`)
+        notifyRestartStatusChanged()
         this.$store.commit("FINISH_PLUGIN_OPERATION", {
           status: operation.status,
           title: operation.status === "error" ? `插件${labels[action]}后应用失败` : `插件${labels[action]}完成`,
           message: operation.message,
+          applyMode: operation.applyMode,
+          restartAvailable: operation.restartAvailable,
+          accessUrls: operation.accessUrls,
+          accessTargets: operation.accessTargets,
         })
-        if (!this._isDestroyed) await this.loadPlugins()
+        if (!this._isDestroyed) await this.loadPlugins(false)
       } catch (error) {
         this.$store.commit("FINISH_PLUGIN_OPERATION", {
           status: "error",

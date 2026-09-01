@@ -86,7 +86,7 @@
             :style="{ borderTop: '1px solid var(--border-color-light)' }"
           >
             <!-- 开关 -->
-            <div class="flex items-center" title="切换插件状态" @click.stop>
+            <div class="flex items-center" title="启用或停用命令响应，不会卸载插件或释放运行时资源" @click.stop>
               <MySwitch
                 :value="data.status"
                 :disabled="!data.allow_switch"
@@ -126,10 +126,10 @@
             <NormalButton
               text="卸载"
               :iconClass="
-                data.is_builtin ? 'uninstall-disabled' : 'uninstall-purple'
+                !data.uninstall_supported ? 'uninstall-disabled' : 'uninstall-purple'
               "
-              :title="data.is_builtin ? '系统内置插件不可卸载' : '卸载插件'"
-              :disabled="data.is_builtin"
+              :title="data.uninstall_supported ? '卸载插件' : data.uninstall_reason || '该插件不可卸载'"
+              :disabled="!data.uninstall_supported"
               :base-class="'hover:scale-110'"
               :active-class="'bg-purple-100 text-purple-600 hover:bg-purple-200 hover:text-purple-800'"
               @click="uninstallPlugin(data)"
@@ -228,7 +228,8 @@ export default {
       if (result) {
         try {
           this.postRequest(`${this.$root.prefix}/store/remove_plugin`, {
-            id: data.id,
+            store_key: data.store_key,
+            module: data.runtime_module,
           }).then((resp) => {
             if (resp.suc) {
               if (resp.warning) {

@@ -51,6 +51,7 @@ export function buildRestartTargets({
   port,
   accessUrls,
   currentOrigin = window.location.origin,
+  preferReturned = false,
 }) {
   const origin = new URL(currentOrigin)
   const currentTarget = targetForHost(origin, origin.hostname, port)
@@ -67,17 +68,32 @@ export function buildRestartTargets({
   const seen = new Set()
 
   if (mode === "local") {
-    if (currentTarget && isLoopback(currentTarget.hostname)) {
+    if (!preferReturned && currentTarget && isLoopback(currentTarget.hostname)) {
       pushUnique(targets, seen, currentTarget)
     }
     loopbackTargets.forEach((target) => pushUnique(targets, seen, target))
+    if (preferReturned && currentTarget && isLoopback(currentTarget.hostname)) {
+      pushUnique(targets, seen, currentTarget)
+    }
   } else if (mode === "custom") {
+    if (preferReturned) {
+      returnedTargets
+        .filter(
+          (target) =>
+            normalizedHostname(target.hostname) ===
+            normalizedHostname(customHost)
+        )
+        .forEach((target) => pushUnique(targets, seen, target))
+    }
     pushUnique(targets, seen, targetForHost(origin, customHost, port))
   } else {
-    if (currentTarget && !isLoopback(currentTarget.hostname)) {
+    if (!preferReturned && currentTarget && !isLoopback(currentTarget.hostname)) {
       pushUnique(targets, seen, currentTarget)
     }
     networkTargets.forEach((target) => pushUnique(targets, seen, target))
+    if (preferReturned && currentTarget && !isLoopback(currentTarget.hostname)) {
+      pushUnique(targets, seen, currentTarget)
+    }
   }
 
   returnedTargets.forEach((target) => pushUnique(targets, seen, target))

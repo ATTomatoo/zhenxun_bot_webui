@@ -42,6 +42,10 @@ export default new Vuex.Store({
       pluginName: "",
       title: "",
       message: "",
+      applyMode: "",
+      restartAvailable: false,
+      accessUrls: [],
+      accessTargets: [],
     },
   },
   getters: {
@@ -69,6 +73,10 @@ export default new Vuex.Store({
         pluginName: payload.pluginName,
         title: payload.title,
         message: payload.message,
+        applyMode: "",
+        restartAvailable: false,
+        accessUrls: [],
+        accessTargets: [],
       }
     },
     FINISH_PLUGIN_OPERATION(state, payload) {
@@ -79,6 +87,10 @@ export default new Vuex.Store({
         status: payload.status,
         title: payload.title,
         message: payload.message,
+        applyMode: payload.applyMode || "",
+        restartAvailable: Boolean(payload.restartAvailable),
+        accessUrls: payload.accessUrls || [],
+        accessTargets: payload.accessTargets || [],
       }
     },
     CLEAR_PLUGIN_OPERATION(state) {
@@ -90,6 +102,10 @@ export default new Vuex.Store({
         pluginName: "",
         title: "",
         message: "",
+        applyMode: "",
+        restartAvailable: false,
+        accessUrls: [],
+        accessTargets: [],
       }
     },
     SET_CHAT_ID(state, chatId) {

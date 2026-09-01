@@ -174,15 +174,17 @@
               </router-link>
             </el-tooltip>
             <el-tooltip :content="restartTooltip" placement="bottom">
-              <button
-                type="button"
-                class="header-icon-button"
-                :disabled="!restartAvailable || restartLoading"
-                aria-label="重启真寻"
-                @click="restartWorker"
-              >
-                <i :class="restartLoading ? 'el-icon-loading' : 'el-icon-refresh-right'"></i>
-              </button>
+              <el-badge :value="pendingRestartCount" :hidden="!pendingRestartCount" class="restart-badge">
+                <button
+                  type="button"
+                  class="header-icon-button"
+                  :disabled="!restartAvailable || restartLoading"
+                  aria-label="重启真寻"
+                  @click="restartWorker"
+                >
+                  <i :class="restartLoading ? 'el-icon-loading' : 'el-icon-refresh-right'"></i>
+                </button>
+              </el-badge>
             </el-tooltip>
           </div>
 
@@ -399,6 +401,8 @@ export default {
       botRequestSequence: 0,
       restartAvailable: false,
       restartLoading: false,
+      pendingRestartCount: 0,
+      pendingRestartReasons: [],
       firstLoad: true,
       windowHeight: window.innerHeight,
       themes: [
@@ -479,6 +483,7 @@ export default {
       return { status: "warning", label: "正在连接", detail: "正在建立WebUI状态通道" }
     },
     restartTooltip() {
+      if (this.pendingRestartCount) return `有 ${this.pendingRestartCount} 项修改等待重启应用`
       return this.restartAvailable
         ? "重启真寻"
         : "当前不是 launcher 托管模式，请手动重启"
@@ -494,6 +499,7 @@ export default {
     window.addEventListener("resize", this.handleResize)
     window.addEventListener("zhenxun-websocket-state", this.handleSocketState)
     window.addEventListener("zhenxun-auth-expired", this.closeSockets)
+    window.addEventListener("zhenxun-restart-status-changed", this.loadRestartStatus)
     const savedCollapse = localStorage.getItem("menuCollapsed")
     this.collapsePreference =
       savedCollapse == null ? null : savedCollapse === "true"
@@ -503,6 +509,7 @@ export default {
     window.removeEventListener("resize", this.handleResize)
     window.removeEventListener("zhenxun-websocket-state", this.handleSocketState)
     window.removeEventListener("zhenxun-auth-expired", this.closeSockets)
+    window.removeEventListener("zhenxun-restart-status-changed", this.loadRestartStatus)
   },
   inject: ["setAppTheme"],
   methods: {
@@ -516,8 +523,12 @@ export default {
       try {
         const response = await this.getRequest(`${this.$root.prefix}/system/restart/status`, {}, { suppressErrorToast: true })
         this.restartAvailable = Boolean(response && response.suc && response.data.launcher_managed)
+        this.pendingRestartCount = Number(response?.data?.pending_count || 0)
+        this.pendingRestartReasons = response?.data?.pending_reasons || []
       } catch (error) {
         this.restartAvailable = false
+        this.pendingRestartCount = 0
+        this.pendingRestartReasons = []
       }
     },
     async restartWorker() {
