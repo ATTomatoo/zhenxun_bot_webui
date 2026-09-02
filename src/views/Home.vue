@@ -191,10 +191,15 @@
           <!-- 右侧功能区 -->
           <div class="flex items-center space-x-4">
             <el-tooltip :content="startupSummary.detail" placement="bottom">
-              <span class="startup-status" :class="`is-${startupSummary.status}`">
+              <button
+                type="button"
+                class="startup-status"
+                :class="`is-${startupSummary.status}`"
+                @click="openStartupReport"
+              >
                 <i></i>
                 <span class="hidden lg:inline">{{ startupSummary.label }}</span>
-              </span>
+              </button>
             </el-tooltip>
             <el-tooltip :content="socketSummary.detail" placement="bottom">
               <span class="socket-status" :class="`is-${socketSummary.status}`">
@@ -372,6 +377,64 @@
       @password-reset="finishLogout"
     />
     <plugin-operation-dialog />
+    <el-drawer
+      title="启动事务"
+      :visible.sync="startupDrawerVisible"
+      :size="isMobile ? '100%' : '460px'"
+      custom-class="startup-drawer"
+    >
+      <div v-loading="startupReportLoading" class="startup-report">
+        <div class="startup-report-summary">
+          <strong>{{ startupSummary.label }}</strong>
+          <span>{{ startupElapsed }}</span>
+        </div>
+        <div v-if="startupReport.current_operation" class="startup-current-operation">
+          <span>当前事务</span>
+          <strong>{{ operationLabel(startupReport.current_operation) }}</strong>
+        </div>
+        <section class="startup-report-section">
+          <h3>阶段</h3>
+          <div
+            v-for="stage in startupStages"
+            :key="stage.key"
+            class="startup-report-row"
+          >
+            <span>{{ stage.label }}</span>
+            <strong :class="`is-${stage.state}`">{{ stage.value }}</strong>
+          </div>
+        </section>
+        <section v-if="startupReport.load_plan" class="startup-report-section">
+          <h3>插件加载</h3>
+          <div class="startup-report-row">
+            <span>关键预载</span>
+            <strong>{{ startupReport.load_plan.counts?.critical_preload || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>运行时加载</span>
+            <strong>{{ startupReport.load_plan.counts?.runtime_load || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>完成进度</span>
+            <strong>{{ startupReport.load_plan.completed || 0 }} / {{ startupReport.load_plan.total || 0 }}</strong>
+          </div>
+          <div v-if="startupReport.load_plan.failed_plugins?.length" class="startup-failures">
+            {{ startupReport.load_plan.failed_plugins.join("、") }}
+          </div>
+        </section>
+        <section class="startup-report-section">
+          <h3>慢事务</h3>
+          <div v-if="!startupSlowOperations.length" class="startup-empty">暂无慢事务</div>
+          <div
+            v-for="operation in startupSlowOperations"
+            :key="`${operation.name}-${operation.duration_ms}`"
+            class="startup-operation-row"
+          >
+            <span>{{ operationLabel(operation) }}</span>
+            <strong>{{ formatDuration(operation.duration_ms) }}</strong>
+          </div>
+        </section>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -395,6 +458,9 @@ export default {
       menuSearch: "",
       socketStates: { status: "connecting", log: "idle", chat: "idle" },
       startupStatus: { state: "starting", stages: {}, errors: [] },
+      startupReport: { state: "starting", stages: {}, errors: [] },
+      startupDrawerVisible: false,
+      startupReportLoading: false,
       startupPollTimer: null,
       asideShow: false,
       isCollapsed: false,
@@ -498,6 +564,23 @@ export default {
       if (state === "failed") return { status: "danger", label: "启动异常", detail: "Bot运行时初始化失败，管理功能仍可用于诊断" }
       return { status: "warning", label: "运行时初始化", detail: "WebUI与数据库已可用，Bot事件暂不处理" }
     },
+    startupElapsed() {
+      return this.formatDuration(this.startupReport.elapsed_ms || this.startupStatus.elapsed_ms || 0)
+    },
+    startupStages() {
+      const stages = this.startupReport.stages || this.startupStatus.stages || {}
+      const labels = { management: "管理服务", runtime: "Bot运行时", warmup: "服务预热" }
+      return ["management", "runtime", "warmup"].map((key) => {
+        const stage = stages[key] || { state: "pending", duration_ms: null }
+        const value = stage.state === "completed"
+          ? this.formatDuration(stage.duration_ms)
+          : stage.state === "failed" ? "失败" : stage.state === "running" ? "进行中" : "等待"
+        return { key, label: labels[key], state: stage.state, value }
+      })
+    },
+    startupSlowOperations() {
+      return (this.startupReport.slow_operations || this.startupStatus.slow_operations || []).slice(0, 12)
+    },
     restartTooltip() {
       if (this.pendingRestartCount) return `有 ${this.pendingRestartCount} 项修改等待重启应用`
       return this.restartAvailable
@@ -537,12 +620,43 @@ export default {
       try {
         const response = await this.getRequest(`${this.$root.prefix}/system/startup/status`, {}, { suppressErrorToast: true })
         if (response?.suc && response.data) this.startupStatus = response.data
+        if (this.startupDrawerVisible && response?.suc && response.data) {
+          this.startupReport = { ...this.startupReport, ...response.data }
+        }
       } catch (error) {
         this.startupStatus = { state: "failed", stages: {}, errors: [{ code: "status_unavailable" }] }
       }
       if (!["warmup_ready", "degraded", "failed"].includes(this.startupStatus.state)) {
         this.startupPollTimer = window.setTimeout(this.loadStartupStatus, 1200)
       }
+    },
+    async openStartupReport() {
+      this.startupDrawerVisible = true
+      this.startupReportLoading = true
+      this.startupReport = { ...this.startupStatus }
+      try {
+        const response = await this.getRequest(
+          `${this.$root.prefix}/system/startup/report`,
+          {},
+          { suppressErrorToast: true }
+        )
+        if (response?.suc && response.data) this.startupReport = response.data
+      } finally {
+        this.startupReportLoading = false
+      }
+    },
+    operationLabel(operation) {
+      const plugin = operation.details?.plugin_id
+      if (plugin) return plugin
+      return String(operation.name || "启动事务")
+        .replace(/^plugin_import:/, "")
+        .replace(/^native_(prebind_)?(startup|ready):/, "")
+    },
+    formatDuration(value) {
+      const duration = Number(value || 0)
+      return duration >= 1000
+        ? `${(duration / 1000).toFixed(2)} s`
+        : `${Math.round(duration)} ms`
     },
     async restorePluginOperation() {
       let saved
@@ -942,6 +1056,19 @@ export default {
   white-space: nowrap;
 }
 
+.startup-status {
+  min-height: 34px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.startup-status:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .socket-status i,
 .startup-status i {
   width: 8px;
@@ -956,6 +1083,89 @@ export default {
 }
 
 .startup-status.is-danger i { background: var(--el-color-danger); }
+
+::v-deep .startup-drawer {
+  background: var(--bg-color-secondary);
+  color: var(--text-color);
+}
+
+::v-deep .startup-drawer .el-drawer__body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.startup-report {
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 22px 28px;
+}
+
+.startup-report-summary,
+.startup-current-operation,
+.startup-report-row,
+.startup-operation-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.startup-report-summary {
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.startup-current-operation {
+  align-items: flex-start;
+  padding: 14px 0;
+  color: var(--text-color-secondary);
+}
+
+.startup-current-operation strong,
+.startup-operation-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.startup-report-section {
+  padding: 18px 0 4px;
+  border-top: 1px solid var(--border-color);
+}
+
+.startup-report-section h3 {
+  margin: 0 0 12px;
+  color: var(--text-color);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.startup-report-row,
+.startup-operation-row {
+  min-height: 34px;
+  color: var(--text-color-secondary);
+  font-size: 13px;
+}
+
+.startup-report-row strong,
+.startup-operation-row strong {
+  color: var(--text-color);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.startup-report-row strong.is-failed,
+.startup-failures {
+  color: var(--danger-color);
+}
+
+.startup-failures,
+.startup-empty {
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+  color: var(--text-color-secondary);
+  font-size: 13px;
+}
 
 ::v-deep .el-menu-item:hover {
   background-color: var(--bg-color-hover) !important;
