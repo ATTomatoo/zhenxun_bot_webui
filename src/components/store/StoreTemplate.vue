@@ -243,7 +243,27 @@ export default {
         const payload = action === "reload"
           ? { store_key: plugin.store_key, module: plugin.runtime_module || plugin.module, operation_id: operationId }
           : { store_key: plugin.store_key, id: plugin.id, operation_id: operationId }
-        const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload)
+        let response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload, { suppressErrorToast: true })
+        if (!response.suc && ["install", "update"].includes(action) && String(response.info || "").includes("source_build_confirmation_required")) {
+          const sourceConfirmed = await this.$cuteConfirm({
+            title: "确认源码构建风险",
+            message: "该插件缺少当前环境可用的 Wheel，依赖需要从源码构建。构建会在隔离依赖层中执行，并且必须重启验证；失败时会回滚。是否继续？",
+            confirmButtonText: "接受风险并继续",
+            cancelButtonText: "取消",
+            type: "warning",
+          })
+          if (!sourceConfirmed) {
+            this.$store.commit("FINISH_PLUGIN_OPERATION", {
+              status: "success",
+              title: `已取消插件${labels[action]}`,
+              message: "未授权源码构建，插件文件和依赖均未修改。",
+            })
+            return
+          }
+          payload.operation_id = this.newOperationId()
+          payload.confirm_source_build = true
+          response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload, { suppressErrorToast: true })
+        }
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
         const operation = this.operationResult(response, response.info || `${labels[action]}已完成。`)
         notifyRestartStatusChanged()
