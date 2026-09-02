@@ -33,8 +33,8 @@
             </el-select>
             <div class="provider-list">
               <button v-for="provider in filteredProviders" :key="provider.name" :class="{ active: selectedProviderName === provider.name }" @click="selectProvider(provider.name)">
-                <span><strong>{{ provider.name }}</strong><small>{{ provider.api_type }}</small></span>
-                <el-tag size="mini" :type="provider.models.length ? 'success' : 'info'">模型 {{ provider.models.length }}</el-tag>
+                <span><strong>{{ provider.name }}</strong><small>{{ provider.api_type }} · {{ provider.models.length }} 个模型</small></span>
+                <el-tag size="mini" :type="providerStatus(provider).type">{{ providerStatus(provider).label }}</el-tag>
               </button>
               <div v-if="!filteredProviders.length" class="empty-copy">暂无服务商</div>
             </div>
@@ -43,7 +43,10 @@
           <main v-if="providerDraft" class="provider-main">
             <div class="section-title">
               <div><h2>{{ providerDraft.isNew ? "添加服务商" : providerDraft.name }}</h2><p>密钥不会从服务端回传；留空表示沿用当前值。</p></div>
-              <el-button v-if="!providerDraft.isNew" type="text" icon="el-icon-delete" class="danger-text" @click="removeProvider">删除服务商</el-button>
+              <div class="provider-heading-actions">
+                <el-tag size="small" :type="providerDraftStatus.type">{{ providerDraftStatus.label }}</el-tag>
+                <el-button v-if="!providerDraft.isNew" type="text" icon="el-icon-delete" class="danger-text" @click="removeProvider">删除服务商</el-button>
+              </div>
             </div>
             <el-form label-position="top" class="provider-form">
               <el-form-item label="服务商名称" :error="operationError('providers.name')"><el-input v-model="providerDraft.name" maxlength="80" @input="markProviderDirty" /></el-form-item>
@@ -70,11 +73,19 @@
             </el-collapse>
 
             <div class="provider-actions">
-              <el-tooltip :disabled="providerDiscoverySupported" content="该 API 类型不支持安全的自动发现，请手动添加模型" placement="top">
-                <span><el-button icon="el-icon-connection" :loading="discovering" :disabled="!providerDiscoverySupported" @click="discoverModels">测试连接并发现模型</el-button></span>
+              <el-tooltip :disabled="providerDraftStatus.code === 'ready'" :content="providerDraftStatus.reason" placement="top">
+                <span><el-button icon="el-icon-connection" :loading="discovering" :disabled="providerDraftStatus.code !== 'ready'" @click="discoverModels">测试连接并发现模型</el-button></span>
               </el-tooltip>
               <el-button type="primary" icon="el-icon-check" :loading="saving === 'provider'" :disabled="!providerDirty" @click="saveProvider">保存服务商</el-button>
             </div>
+            <el-alert
+              v-if="selectedProbeResult"
+              class="provider-probe-result"
+              :type="selectedProbeResult.success ? 'success' : 'error'"
+              :closable="false"
+              show-icon
+              :title="selectedProbeResult.message"
+            />
 
             <section v-if="!providerDraft.isNew" class="models-section">
               <div class="subheading"><div><h3>模型</h3><p>模型列表与服务商连接参数独立保存。</p></div><el-button size="small" icon="el-icon-plus" @click="openModelEditor()">手动添加</el-button></div>
@@ -213,7 +224,7 @@ export default {
     return {
       loading: false, loadError: "", saving: "", activeSection: "providers", revision: "", schema: {}, apiTypes: [], defaultApiBases: {}, discoveryApiTypes: [], effects: {}, runtime: {}, providers: [], validationIssues: [], operationIssues: [], selectedProviderName: "", providerDraft: null,
       providerSearch: "", providerDirty: false, modelsDirty: false, modelSearch: "", sectionDrafts: { default_models: {}, model_groups: {}, context: {}, agent: {}, sandbox: {}, advanced: {} }, originalSections: {}, dirtySections: {}, invalidSections: {}, groupRows: [], routeSearch: "", selectedRouteGroupId: "", routingIssues: [],
-      discovering: false, discoveryDialog: false, discoveredModels: [], selectedDiscovered: [], discoverySearch: "", modelDialog: false, modelDraft: emptyModel(), modelEditIndex: null,
+      discovering: false, discoveryDialog: false, discoveredModels: [], selectedDiscovered: [], discoverySearch: "", providerProbeResults: {}, modelDialog: false, modelDraft: emptyModel(), modelEditIndex: null,
       personaLoading: false, personaSaving: false, personaAvailable: null, personaRevision: "", personaDraft: { name: "", prompt: "", style: "", enabled: true }, personaOriginal: null, personaToneText: "", personaDialogueText: "", personaDirty: false,
       defaultTasks: [{ key: "chat", label: "对话" }, { key: "embedding", label: "向量嵌入" }, { key: "tts", label: "语音合成" }, { key: "image", label: "图像生成" }, { key: "rerank", label: "文本重排" }],
       schemaTabs: [
@@ -234,6 +245,20 @@ export default {
     selectedRouteGroup() { return this.groupRows.find((item) => item.clientId === this.selectedRouteGroupId) || null },
     filteredDiscovered() { const key = this.discoverySearch.trim().toLowerCase(); return this.discoveredModels.filter((item) => item.toLowerCase().includes(key)) },
     providerDiscoverySupported() { return Boolean(this.providerDraft && this.discoveryApiTypes.includes(this.providerDraft.api_type)) },
+    providerDraftStatus() {
+      if (!this.providerDraft) return { code: "unavailable", label: "状态待确认", type: "info", reason: "请先选择服务商" }
+      if (!this.providerDiscoverySupported) return { code: "manual_only", label: "仅手动添加", type: "info", reason: "该 API 类型不支持安全的模型自动发现，请手动添加模型" }
+      const original = this.providers.find((item) => item.name === this.selectedProviderName)
+      const draftBase = String(this.providerDraft.api_base || this.defaultApiBases[this.providerDraft.api_type] || "").replace(/\/$/, "")
+      const originalBase = String(original?.api_base || this.defaultApiBases[original?.api_type] || "").replace(/\/$/, "")
+      const temporaryKey = this.providerDraft.api_key_slots.some((slot) => String(slot.value || "").trim())
+      if (original && !temporaryKey && (original.api_type !== this.providerDraft.api_type || originalBase !== draftBase)) return { code: "scope_changed", label: "凭据范围已变化", type: "warning", reason: "修改 API 类型或地址后，请填写临时 API Key 再测试" }
+      if (!draftBase) return { code: "missing_base", label: "缺少 API 地址", type: "warning", reason: "请先填写 API 地址" }
+      const hasSavedKey = this.providerDraft.api_key_slots.some((slot) => slot.existing_index != null)
+      if (!temporaryKey && !hasSavedKey) return { code: "missing_credentials", label: "缺少有效凭据", type: "warning", reason: "请先填写有效 API Key" }
+      return { code: "ready", label: "支持自动发现", type: "success", reason: "" }
+    },
+    selectedProbeResult() { return this.providerProbeResults[this.selectedProviderName || "__new__"] || null },
     groupNameErrors() {
       const counts = this.groupRows.reduce((result, row) => { const name = row.name.trim(); if (name) result[name] = (result[name] || 0) + 1; return result }, {})
       return this.groupRows.map((row) => !row.name.trim() ? "请填写路由组名称。" : counts[row.name.trim()] > 1 ? "路由组名称不能重复。" : "")
@@ -292,13 +317,30 @@ export default {
     },
     async discoverModels() {
       this.discovering = true
+      const resultKey = this.selectedProviderName || "__new__"
       try {
         const temporaryKey = this.providerDraft.api_key_slots.find((slot) => slot.value)?.value || null
-        const response = await this.postRequest(`${this.$root.prefix}/ai/providers/discover`, { provider_name: this.providerDraft.isNew ? null : this.selectedProviderName, api_type: this.providerDraft.api_type, api_base: this.providerDraft.api_base, api_key: temporaryKey })
+        const response = await this.postRequest(`${this.$root.prefix}/ai/providers/discover`, { provider_name: this.providerDraft.isNew ? null : this.selectedProviderName, api_type: this.providerDraft.api_type, api_base: this.providerDraft.api_base, api_key: temporaryKey }, { suppressErrorToast: true })
         if (!response.suc) throw new Error(response.info)
+        this.$set(this.providerProbeResults, resultKey, { success: true, message: `连接成功，发现 ${response.data.models?.length || 0} 个模型，耗时 ${response.data.latency_ms || 0} ms。` })
         this.discoveredModels = response.data.models || []; this.selectedDiscovered = []; this.discoveryDialog = true
-      } catch (error) { this.captureOperationError(error, "服务商连接测试失败。") }
+      } catch (error) {
+        const message = apiErrorDetail(error, "服务商连接测试失败。")
+        this.operationIssues = apiErrorIssues(error)
+        this.$set(this.providerProbeResults, resultKey, { success: false, message })
+      }
       finally { this.discovering = false }
+    },
+    providerStatus(provider) {
+      const probe = this.providerProbeResults[provider.name]
+      if (probe) return probe.success ? { label: "最近验证成功", type: "success" } : { label: "最近验证失败", type: "danger" }
+      const states = {
+        ready: { label: "支持自动发现", type: "success" },
+        manual_only: { label: "仅手动添加", type: "info" },
+        missing_credentials: { label: "缺少有效凭据", type: "warning" },
+        missing_base: { label: "缺少 API 地址", type: "warning" },
+      }
+      return states[provider.discovery_status] || { label: "状态待确认", type: "info" }
     },
     addDiscoveredModels() { const exists = new Set(this.providerDraft.models.map((item) => item.model_name)); let added = 0; this.selectedDiscovered.forEach((name) => { if (!exists.has(name)) { this.providerDraft.models.push({ ...emptyModel(), model_name: name }); exists.add(name); added += 1 } }); this.modelsDirty = this.modelsDirty || added > 0; this.discoveryDialog = false; this.syncDirty() },
     openModelEditor(model = null, index = null) { this.modelDraft = model ? { ...clone(model), capabilities: undefined } : emptyModel(); this.modelEditIndex = index; this.modelDialog = true },
@@ -308,7 +350,7 @@ export default {
     async saveModels() { this.saving = "models"; try { const models = this.providerDraft.models.map(({ capabilities, ...model }) => model); const response = await this.putRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}/models`, { expected_revision: this.revision, models }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); await this.handleAiApply(response) } catch (error) { this.captureOperationError(error, "模型列表保存失败。") } finally { this.saving = "" } },
     capabilityTags(model) { const caps = model.capabilities || {}; const result = []; if (caps.is_embedding_model) result.push("Embedding"); if (caps.is_rerank_model) result.push("Rerank"); if ((caps.output_modalities || []).includes("image")) result.push("图像"); if ((caps.output_modalities || []).includes("audio")) result.push("语音"); if (caps.supports_tool_calling) result.push("工具"); return result.slice(0, 3) },
     modelTask(model) { const caps = model.capabilities || {}; if (caps.is_embedding_model || model.task_type === "embedding") return "embedding"; if (caps.is_rerank_model || model.task_type === "rerank") return "rerank"; if ((caps.output_modalities || []).includes("image") || model.task_type === "image_generation") return "image"; if ((caps.output_modalities || []).includes("audio") || model.task_type === "tts") return "tts"; return "chat" },
-    async testModel(model) { const task = this.modelTask(model); try { await this.$confirm(`将对 ${this.selectedProviderName}/${model.model_name} 发起一次最小 ${task} 请求，可能产生费用。`, "确认模型测试", { type: "warning" }) } catch (_) { return } try { const response = await this.postRequest(`${this.$root.prefix}/ai/models/test`, { model: `${this.selectedProviderName}/${model.model_name}`, task, confirmed_paid_request: true }); this.$message.success(`连接成功，延迟 ${response.data.latency_ms} ms`) } catch (error) { this.$message.error(apiErrorDetail(error, "模型测试失败。")) } },
+    async testModel(model) { const task = this.modelTask(model); try { await this.$confirm(`将对 ${this.selectedProviderName}/${model.model_name} 发起一次最小 ${task} 请求，可能产生费用。`, "确认模型测试", { type: "warning" }) } catch (_) { return } try { const response = await this.postRequest(`${this.$root.prefix}/ai/models/test`, { model: `${this.selectedProviderName}/${model.model_name}`, task, confirmed_paid_request: true }, { suppressErrorToast: true }); this.$message.success(`连接成功，延迟 ${response.data.latency_ms} ms`) } catch (error) { this.$message.error(apiErrorDetail(error, "模型测试失败。")) } },
     async loadPersona() {
       this.personaLoading = true
       try {
@@ -472,6 +514,7 @@ export default {
 .route-empty { padding: 38px 12px; color: var(--text-color-secondary); text-align: center; }
 .add-route-target, .route-issues { margin-top: 14px; }
 .persona-section { min-height: 520px; }.persona-form { margin-top: 18px; }.persona-basics { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 18px; }.persona-section .el-alert { margin-top: 18px; }.persona-section .el-alert p { margin: 0 0 12px; }
+.provider-heading-actions { display: flex; align-items: center; gap: 10px; }.provider-probe-result { margin-top: 12px; }
 @media (max-width: 820px) { .mobile-provider-select { display: block; }.provider-list { display: none; } }
 @media (max-width: 820px) { .route-workbench { grid-template-columns: 1fr; }.route-sidebar { border-right: 0; border-bottom: 1px solid var(--border-color); }.route-editor { padding: 16px; }.route-target-row { grid-template-columns: 54px 100px minmax(0, 1fr); padding: 10px 0; }.route-target-actions { grid-column: 2 / -1; justify-content: flex-end; } }
 @media (max-width: 620px) { .persona-basics { grid-template-columns: 1fr; gap: 0; } }

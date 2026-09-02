@@ -63,30 +63,35 @@
               {{ reloadLabel(plugin) }}
             </el-tag>
           </div>
+          <div v-else-if="plugin.catalog_status === 'missing'" class="catalog-blocked">
+            目录中的插件路径已失效，暂时不能安装
+          </div>
           <footer class="plugin-actions">
-            <el-button type="text" @click="showDetails(plugin)">详情</el-button>
-            <el-tooltip content="打开插件仓库" placement="top">
-              <el-button v-if="repositoryUrl(plugin)" class="icon-action" icon="el-icon-link" circle @click="openRepository(plugin)" />
-            </el-tooltip>
-            <span class="action-spacer"></span>
-            <el-button v-if="capability === 'ai_chat' && plugin.installed" class="plugin-config-action" type="primary" plain size="small" icon="el-icon-setting" @click="openPluginConfiguration(plugin)">插件配置</el-button>
-            <el-tooltip v-if="plugin.installed && plugin.reload_support === 'hot_reloadable'" content="热重载插件" placement="top">
-              <el-button
-                class="icon-action"
-                icon="el-icon-refresh"
-                circle
-                :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'reload'"
-                @click="runAction('reload', plugin)"
-              />
-            </el-tooltip>
-            <el-button v-if="!plugin.installed" type="primary" size="small" :loading="actionId === (plugin.store_key || plugin.id)" @click="runAction('install', plugin)">安装</el-button>
-            <el-button v-if="plugin.installed && plugin.update_available" type="warning" size="small" :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'update'" @click="runAction('update', plugin)">更新插件</el-button>
-            <el-dropdown v-if="plugin.installed" trigger="click" @command="runAction($event, plugin)">
-              <el-button size="small">已安装<i class="el-icon-arrow-down el-icon--right" /></el-button>
-              <el-dropdown-menu slot="dropdown">
-                <el-dropdown-item command="remove" divided>卸载</el-dropdown-item>
-              </el-dropdown-menu>
-            </el-dropdown>
+            <template v-if="plugin.pending_action">
+              <el-button type="text" @click="showDetails(plugin)">详情</el-button>
+              <span class="action-spacer"></span>
+              <el-button size="small" icon="el-icon-time" disabled>等待重启</el-button>
+              <el-button size="small" type="text" class="danger-text" @click="cancelPending(plugin)">撤销</el-button>
+            </template>
+            <template v-else>
+              <el-button type="text" @click="showDetails(plugin)">详情</el-button>
+              <el-tooltip content="打开插件仓库" placement="top">
+                <el-button v-if="repositoryUrl(plugin)" class="icon-action" icon="el-icon-link" circle @click="openRepository(plugin)" />
+              </el-tooltip>
+              <span class="action-spacer"></span>
+              <el-button v-if="capability === 'ai_chat' && plugin.installed" class="plugin-config-action" type="primary" plain size="small" icon="el-icon-setting" @click="openPluginConfiguration(plugin)">插件配置</el-button>
+              <el-tooltip v-if="plugin.installed && plugin.reload_support === 'hot_reloadable'" content="热重载插件" placement="top">
+                <el-button class="icon-action" icon="el-icon-refresh" circle :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'reload'" @click="runAction('reload', plugin)" />
+              </el-tooltip>
+              <el-tooltip v-if="!plugin.installed" :content="plugin.catalog_status === 'missing' ? '仓库中找不到目录声明的插件文件' : '安装插件'" placement="top">
+                <span><el-button type="primary" size="small" :disabled="plugin.catalog_status === 'missing'" :loading="actionId === (plugin.store_key || plugin.id)" @click="runAction('install', plugin)">安装</el-button></span>
+              </el-tooltip>
+              <el-button v-if="plugin.installed && plugin.update_available" type="warning" size="small" :loading="actionId === (plugin.store_key || plugin.id) && actionType === 'update'" @click="runAction('update', plugin)">更新插件</el-button>
+              <el-dropdown v-if="plugin.installed" trigger="click" @command="runAction($event, plugin)">
+                <el-button size="small">已安装<i class="el-icon-arrow-down el-icon--right" /></el-button>
+                <el-dropdown-menu slot="dropdown"><el-dropdown-item command="remove" divided>卸载</el-dropdown-item></el-dropdown-menu>
+              </el-dropdown>
+            </template>
           </footer>
         </article>
       </div>
@@ -146,6 +151,11 @@ export default {
   watch: { search() { this.page = 1 }, statusFilter() { this.page = 1 }, typeFilter() { this.page = 1 }, sortBy() { this.page = 1 } },
   mounted() { this.loadPlugins() },
   methods: {
+    newOperationId() {
+      const bytes = new Uint8Array(16)
+      window.crypto.getRandomValues(bytes)
+      return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")
+    },
     repositoryUrl(plugin) { return plugin.github_url || plugin.ali_url || "" },
     openRepository(plugin) { window.open(this.repositoryUrl(plugin), "_blank", "noopener,noreferrer") },
     showDetails(plugin) { this.selectedPlugin = plugin; this.drawerVisible = true },
@@ -170,10 +180,14 @@ export default {
     },
     operationResult(response, fallback) {
       const mode = response.data?.apply_mode
+      const reasons = response.data?.reason_codes || []
+      const restartReason = reasons.some((item) => String(item).includes("orm_model"))
+        ? "插件包含数据库模型，需要重启完成模型注册。"
+        : "插件文件操作已完成，需要重启后生效。"
       const labels = {
         hot_reloaded: "运行时已热加载，无需重启。",
         restart_requested: "已请求受控重启，重启完成后生效。",
-        restart_pending: response.data?.restart_available ? "插件文件操作已完成，需要重启后生效。" : "插件文件操作已完成，请手动重启后生效。",
+        restart_pending: response.data?.restart_available ? restartReason : `${restartReason} 当前不是 launcher 托管模式，请手动重启。`,
         failed: response.data?.rolled_back ? "运行时应用失败，插件文件已自动恢复。" : "运行时应用失败，请查看运行状态。",
       }
       const detail = labels[mode]
@@ -203,10 +217,16 @@ export default {
         this.$message.warning("已有插件操作正在进行，请等待完成。")
         return
       }
+      if (action === "install" && plugin.catalog_status === "missing") {
+        this.$message.error("目录中的插件路径已失效，请等待目录维护者修复。")
+        return
+      }
       const confirmed = await this.$cuteConfirm({ title: `${labels[action]}插件`, message: `确认${labels[action]}“${plugin.name}”？`, confirmButtonText: "确认", cancelButtonText: "取消", type: action === "remove" ? "warning" : "info" })
       if (!confirmed) return
       this.actionId = plugin.store_key || plugin.id
       this.actionType = action
+      const operationId = this.newOperationId()
+      sessionStorage.setItem("zhenxun_plugin_operation", JSON.stringify({ operationId, action, pluginName: plugin.name }))
       const runningTitles = {
         install: "正在下载并安装插件",
         update: "正在下载并更新插件",
@@ -221,8 +241,8 @@ export default {
       })
       try {
         const payload = action === "reload"
-          ? { store_key: plugin.store_key, module: plugin.runtime_module || plugin.module }
-          : { store_key: plugin.store_key, id: plugin.id }
+          ? { store_key: plugin.store_key, module: plugin.runtime_module || plugin.module, operation_id: operationId }
+          : { store_key: plugin.store_key, id: plugin.id, operation_id: operationId }
         const response = await this.postRequest(`${this.$root.prefix}/store/${action}_plugin`, payload)
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
         const operation = this.operationResult(response, response.info || `${labels[action]}已完成。`)
@@ -246,6 +266,19 @@ export default {
       }
       finally { this.actionId = null; this.actionType = "" }
     },
+    async cancelPending(plugin) {
+      if (!plugin.pending_operation_id) return
+      const confirmed = await this.$cuteConfirm({ title: "撤销待重启操作", message: `撤销“${plugin.name}”的待应用修改？`, confirmButtonText: "撤销", cancelButtonText: "保留", type: "warning" })
+      if (!confirmed) return
+      try {
+        const response = await this.deleteRequest(`${this.$root.prefix}/store/transactions/pending/${encodeURIComponent(plugin.pending_operation_id)}`, {}, { suppressErrorToast: true })
+        if (!response.suc) throw new Error(response.info || "撤销失败")
+        notifyRestartStatusChanged()
+        await this.loadPlugins(false)
+      } catch (error) {
+        this.$message.error(error.response?.data?.detail || error.message || "撤销失败")
+      }
+    },
   },
 }
 </script>
@@ -265,6 +298,7 @@ export default {
 .plugin-description { display: -webkit-box; min-height: 44px; margin: 14px 0; overflow: hidden; color: var(--text-color-secondary); line-height: 22px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .plugin-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 0 0 14px; }.plugin-meta div { min-width: 0; }.plugin-meta dt { color: var(--text-color-secondary); font-size: 11px; }.plugin-meta dd { margin: 2px 0 0; overflow: hidden; color: var(--text-color); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .reload-diagnostic { min-height: 24px; margin-bottom: 8px; }
+.catalog-blocked { margin-bottom: 8px; color: var(--danger-color); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .plugin-actions { display: flex; min-height: 34px; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-color); }.action-spacer { flex: 1; }.icon-action { width: 32px; height: 32px; padding: 0; }
 .inline-state, .empty-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 96px; color: var(--text-color-secondary); }.inline-state.is-error { margin-bottom: 14px; border: 1px solid var(--el-color-danger-light-7); border-radius: 6px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); }
 .empty-state { min-height: 300px; flex-direction: column; }.empty-state i { font-size: 34px; }.empty-state h2, .empty-state p { margin: 0; }.store-pagination { margin-top: 20px; text-align: center; }

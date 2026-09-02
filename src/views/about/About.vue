@@ -9,8 +9,27 @@
           <p>查看运行版本，并从官方仓库检查本体、资源和 WebUI 更新。</p>
         </div>
       </div>
-      <el-button icon="el-icon-refresh" :loading="checking" @click="checkUpdates(true)">检查更新</el-button>
+      <div class="about-actions">
+        <el-button icon="el-icon-refresh" :loading="checking" @click="checkUpdates(true)">检查更新</el-button>
+        <el-badge :value="restartStatus.pending_count" :hidden="!restartStatus.pending_count">
+          <el-button type="warning" plain icon="el-icon-refresh-right" :loading="restarting" :disabled="!restartStatus.launcher_managed" @click="restartWorker">重启真寻</el-button>
+        </el-badge>
+      </div>
     </header>
+
+    <div v-if="restartStatus.pending_restart" class="restart-notice">
+      <div>
+        <strong>有 {{ restartStatus.pending_count }} 项修改等待重启</strong>
+        <p>{{ pendingReasonText }}</p>
+        <ul v-if="restartStatus.pending_items && restartStatus.pending_items.length" class="pending-items">
+          <li v-for="(item, index) in restartStatus.pending_items" :key="item.operation_id || `${item.source}-${index}`">
+            <span>{{ pendingItemLabel(item) }}</span>
+            <code>{{ item.store_key || item.source }}</code>
+          </li>
+        </ul>
+      </div>
+      <span>{{ restartStatus.launcher_managed ? "可在此统一重启应用" : "当前不是 launcher 托管模式，请手动重启" }}</span>
+    </div>
 
     <section class="update-section">
       <div class="section-heading">
@@ -71,10 +90,10 @@
           <div class="version-actions">
             <span>{{ component.ref ? `来源 ${component.ref}` : "官方仓库" }}</span>
             <el-button v-if="isPendingUpdate(component.key)" type="primary" size="small" icon="el-icon-refresh-right" @click="applyUpdate(jobFor(component.key))">
-              立即重启并应用
+              重启后应用
             </el-button>
             <el-button v-else type="primary" size="small" :loading="isUpdating(component.key)" :disabled="!canUpdate(component)" @click="startUpdate(component)">
-              {{ component.updateAvailable ? "立即更新" : "重新安装" }}
+              {{ updateButtonLabel(component) }}
             </el-button>
           </div>
         </article>
@@ -107,6 +126,7 @@
 
 <script>
 import logoUrl from "@/assets/image/logo.png"
+import { hasDirtyState } from "@/utils/dirty-state"
 import { requestRestartWithRecovery } from "@/utils/restart-flow"
 
 const COMPONENT_META = {
@@ -121,7 +141,8 @@ export default {
     return {
       logoUrl, checking: false, updateInfo: null, updateError: "",
       options: { channel: "main", method: "git", source: "aliyun", force: false },
-      jobs: {}, pollTimer: null,
+      jobs: {}, pollTimer: null, restarting: false,
+      restartStatus: { launcher_managed: false, pending_restart: false, pending_count: 0, pending_reasons: [], pending_items: [] },
     }
   },
   computed: {
@@ -136,14 +157,27 @@ export default {
         return { key, ...COMPONENT_META[key], currentVersion: item.current_version || "未知", latestVersion: item.latest_version || "未知", updateAvailable: Boolean(item.update_available), blocked: Boolean(item.blocked), blockReason: item.block_reason || "", manifestAvailable: item.manifest_available !== false, compatible: item.compatible !== false, ref: item.ref, source: "官方仓库" }
       })
     },
+    pendingReasonText() {
+      const labels = { DB_URL: "数据库连接", HOST: "监听地址", PORT: "监听端口", DRIVER: "驱动", EXT_PATH: "扩展插件目录" }
+      return (this.restartStatus.pending_reasons || []).map((reason) => {
+        const key = String(reason).split(":").pop()
+        return labels[key] || key
+      }).join("、") || "启动期配置已经保存"
+    },
   },
   mounted() {
     const activeJobId = sessionStorage.getItem("zhenxun_update_job_id")
     if (activeJobId) this.pollJob(activeJobId, true)
+    this.loadRestartStatus()
+    window.addEventListener("zhenxun-restart-status-changed", this.loadRestartStatus)
     this.checkUpdates(false)
   },
-  beforeDestroy() { if (this.pollTimer) window.clearTimeout(this.pollTimer) },
+  beforeDestroy() { if (this.pollTimer) window.clearTimeout(this.pollTimer); window.removeEventListener("zhenxun-restart-status-changed", this.loadRestartStatus) },
   methods: {
+    pendingItemLabel(item) {
+      const actions = { install: "安装插件", update: "更新插件", uninstall: "卸载插件" }
+      return actions[item.action] || "待应用修改"
+    },
     async checkUpdates(refresh) {
       this.checking = true; this.updateError = ""
       try {
@@ -160,10 +194,11 @@ export default {
     jobFor(component) { return this.jobs[component] },
     isPendingUpdate(component) { return this.jobFor(component)?.state === "pending_restart" },
     isUpdating(component) { const job = this.jobFor(component); return Boolean(job && !["completed", "failed"].includes(job.state)) },
+    updateButtonLabel(component) { if (!component.updateAvailable) return "重新安装"; return component.key === "resource" ? "更新资源" : component.key === "webui" ? "更新并刷新" : "下载更新" },
     canUpdate(component) { if (component.blocked || this.isUpdating(component.key) || component.latestVersion === "未知") return false; return component.key !== "webui" || (component.manifestAvailable && component.compatible) },
     jobProgressStatus(job) { if (job.state === "failed") return "exception"; if (job.state === "completed") return "success"; return undefined },
     jobStateLabel(job) {
-      const labels = { queued: "等待执行", preparing: "正在下载并校验", staged: "更新包已就绪", pending_restart: job.restart_available ? "已下载，等待确认重启应用" : "已下载，等待手动重启应用", restart_requested: "正在重启并应用", applying: "正在应用更新", completed: "更新完成", failed: `更新失败：${job.error || "未知错误"}` }
+      const labels = { queued: "等待执行", preparing: "正在下载并校验", staged: "更新包已就绪", pending_restart: job.fallback_reason ? "热更新受文件占用影响，等待重启应用" : job.restart_available ? "已下载，等待确认重启应用" : "已下载，等待手动重启应用", restart_requested: "正在重启并应用", applying: job.component === "resource" ? "正在热更新资源" : "正在应用更新", completed: job.apply_mode === "hot_reloaded" ? "资源已热更新" : "更新完成", failed: `更新失败：${job.error || "未知错误"}` }
       return labels[job.state] || job.state
     },
     jobSourceLabel(job) {
@@ -186,6 +221,19 @@ export default {
         this.pollJob(response.data.job_id)
       } catch (error) { this.$message.error(error.response?.data?.detail || error.message || "更新任务创建失败。") }
     },
+    async loadRestartStatus() {
+      try { const response = await this.getRequest(`${this.$root.prefix}/system/restart/status`, {}, { suppressErrorToast: true }); if (response?.suc) this.restartStatus = response.data }
+      catch (error) { this.restartStatus = { launcher_managed: false, pending_restart: false, pending_count: 0, pending_reasons: [], pending_items: [] } }
+    },
+    async restartWorker() {
+      if (!this.restartStatus.launcher_managed || this.restarting) return
+      const warning = hasDirtyState() ? "当前页面有尚未保存的修改，重启后会丢失。是否继续？" : "重启会短暂断开所有 Bot 和 WebUI 连接，是否继续？"
+      try { await this.$confirm(warning, "确认重启", { type: "warning", confirmButtonText: "确认重启" }) } catch (error) { return }
+      this.restarting = true
+      try { await requestRestartWithRecovery(this, { request: () => this.postRequest(`${this.$root.prefix}/system/restart`, {}), recovery: { policy: "preserve", returnRoute: "/about", message: "正在等待 launcher 启动新的真寻进程。" } }) }
+      catch (error) { this.$message.error(error.response?.data?.detail || error.message || "重启请求失败。") }
+      finally { this.restarting = false }
+    },
     async applyUpdate(job) {
       try {
         await requestRestartWithRecovery(this, {
@@ -204,7 +252,7 @@ export default {
           if (!response || !response.suc) throw new Error(response && response.info)
           const job = response.data; this.$set(this.jobs, job.component, job)
           if (!["completed", "failed", "pending_restart"].includes(job.state)) this.pollJob(jobId)
-          else if (job.state === "completed") { sessionStorage.removeItem("zhenxun_update_job_id"); this.$message.success(`${COMPONENT_META[job.component].name}更新完成。`); await this.checkUpdates(true) }
+          else if (job.state === "completed") { sessionStorage.removeItem("zhenxun_update_job_id"); this.$message.success(job.apply_mode === "hot_reloaded" ? "资源已热更新，无需重启。" : `${COMPONENT_META[job.component].name}更新完成。`); await this.checkUpdates(true); await this.loadRestartStatus() }
           else if (job.state === "failed") { sessionStorage.removeItem("zhenxun_update_job_id"); this.$message.error(this.jobStateLabel(job)) }
         } catch (error) { this.pollJob(jobId) }
       }, immediate ? 0 : 1500)
@@ -216,6 +264,8 @@ export default {
 <style lang="scss" scoped>
 .about-page { min-height: 100%; padding: 4px 8px 34px; color: var(--text-color); }
 .about-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.about-actions { display: flex; align-items: center; gap: 10px; }.restart-notice { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 14px; padding: 12px 14px; border-left: 3px solid #c59027; background: rgba(197,144,39,.09); }.restart-notice strong, .restart-notice p { margin: 0; }.restart-notice p, .restart-notice > span { margin-top: 4px; color: var(--text-color-secondary); font-size: 12px; }
+.pending-items { display: grid; gap: 4px; margin: 9px 0 0; padding: 0; list-style: none; }.pending-items li { display: flex; min-width: 0; align-items: baseline; gap: 8px; font-size: 12px; }.pending-items code { overflow-wrap: anywhere; color: var(--text-color-secondary); }
 .about-heading { padding-bottom: 24px; border-bottom: 1px solid var(--border-color-light); }
 .brand-block { display: flex; align-items: center; gap: 22px; min-width: 0; }.brand-block img { width: 190px; height: auto; }
 .eyebrow { margin: 0 0 4px; color: var(--primary-color); font-size: 12px; font-weight: 700; letter-spacing: .14em; } h1 { margin: 0; font-size: 30px; }
@@ -234,5 +284,5 @@ dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px 0; }
 .about-content { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 28px; padding: 30px 0; }.about-content article { min-width: 0; }.about-content p { color: var(--text-color-secondary); line-height: 1.75; }.about-content a { color: var(--primary-color); text-decoration: none; }.link-row { display: flex; flex-wrap: wrap; gap: 16px; }
 footer { padding-top: 18px; border-top: 1px solid var(--border-color-light); color: var(--text-color-secondary); text-align: center; font-size: 13px; }
 @media (max-width: 1050px) { .version-grid { grid-template-columns: 1fr 1fr; }.about-content { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 700px) { .about-page { padding-right: 2px; padding-left: 2px; }.about-heading, .section-heading { align-items: stretch; flex-direction: column; }.brand-block { align-items: flex-start; flex-direction: column; }.brand-block img { width: 150px; }.update-options { flex-wrap: wrap; }.version-grid, .about-content { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .about-page { padding-right: 2px; padding-left: 2px; }.about-heading, .section-heading, .restart-notice { align-items: stretch; flex-direction: column; }.about-actions { flex-wrap: wrap; }.brand-block { align-items: flex-start; flex-direction: column; }.brand-block img { width: 150px; }.update-options { flex-wrap: wrap; }.version-grid, .about-content { grid-template-columns: 1fr; } }
 </style>
