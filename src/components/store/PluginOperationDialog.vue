@@ -49,7 +49,7 @@ export default {
       this.restarting = true
       try {
         const started = await requestRestartWithRecovery(this, {
-          request: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
+          request: () => this.postRequest(`${this.$root.prefix}/system/restart/apply-pending`, {}),
           recovery: {
             policy: "preserve",
             returnRoute: this.$route.path,
@@ -67,6 +67,7 @@ export default {
     },
     close(done) {
       if (this.operation.active) return
+      sessionStorage.removeItem("zhenxun_plugin_operation")
       this.$store.commit("CLEAR_PLUGIN_OPERATION")
       if (typeof done === "function") done()
     },

@@ -13,7 +13,8 @@
       <el-select v-model="statusFilter" aria-label="安装状态">
         <el-option label="全部状态" value="all" />
         <el-option label="未安装" value="not_installed" />
-        <el-option label="已托管" value="managed" />
+        <el-option label="已安装" value="installed" />
+        <el-option label="WebUI 托管" value="managed" />
         <el-option label="可更新" value="update_available" />
         <el-option label="外部安装" value="external" />
         <el-option label="不可安装" value="blocked" />
@@ -82,12 +83,15 @@
               （{{ plugin.failure_reasons[0].paths.join("、") }}）
             </span>
           </div>
+          <div v-if="plugin.pending_reasons && plugin.pending_reasons.length" class="blocked-reason">
+            {{ reasonLabel(plugin.pending_reasons[0]) }}
+          </div>
         </div>
         <div class="plugin-actions">
           <el-button type="text" @click="openDetail(plugin)">详情</el-button>
-          <el-tooltip v-if="plugin.apply_mode === 'restart_pending'" content="事务已保存，重启并通过启动验证后生效" placement="top">
+          <el-tooltip v-if="plugin.apply_mode === 'restart_pending'" :content="plugin.transaction_state === 'migration_blocked' ? '外部数据库迁移尚未完成；手工迁移后再次重启即可重新检查' : '事务已保存，重启并通过启动验证后生效'" placement="top">
             <span class="pending-actions">
-              <el-button size="small" icon="el-icon-time" disabled>等待重启</el-button>
+              <el-button size="small" icon="el-icon-time" disabled>{{ plugin.transaction_state === "migration_blocked" ? "等待手工迁移" : "等待重启" }}</el-button>
               <el-button size="small" type="danger" plain icon="el-icon-close" @click="cancelPending(plugin)">取消事务</el-button>
             </span>
           </el-tooltip>
@@ -225,12 +229,17 @@
               <el-alert v-if="analysis.plan.source_build_required" title="需要从源码构建" type="warning" :closable="false" show-icon>
                 <p>构建过程可能调用本机编译工具，仅会在停止 worker 后执行，并强制重启验证。</p>
               </el-alert>
+              <el-alert v-if="analysis.plan.database_migration_possible" title="插件可能包含数据库迁移" type="warning" :closable="false" show-icon>
+                <p v-if="analysis.plan.database_type === 'external'">当前使用外部数据库。系统只执行迁移检查，不会自动修改；迁移未完成时将保留旧运行版本。</p>
+                <p v-else>launcher 将在停止 worker 后备份 SQLite、非交互执行迁移，并在迁移或启动失败时恢复数据库。</p>
+              </el-alert>
 
               <div class="confirmations">
                 <el-checkbox v-model="confirmCode">我了解插件代码与真寻运行在同一进程，并拥有同等权限</el-checkbox>
                 <el-checkbox v-if="analysis.plan.non_core_changes.length" v-model="confirmChanges">我已核对并接受上述非核心依赖变化</el-checkbox>
                 <el-checkbox v-if="analysis.plan.source_build_required" v-model="confirmSource">我已核对并接受源码构建风险</el-checkbox>
                 <el-checkbox v-if="compatibilityOverrides.length" v-model="confirmCompatibility">我了解插件未声明支持当前依赖版本，并接受兼容试运行</el-checkbox>
+                <el-checkbox v-if="analysis.plan.database_migration_possible" v-model="confirmMigration">我已了解并接受上述数据库迁移处理方式</el-checkbox>
               </div>
             </template>
           </template>
@@ -289,18 +298,21 @@ const reasonLabels = {
   plugin_import_failed: "插件导入失败，已恢复原运行版本。",
   plugin_startup_verification_failed: "插件未通过启动验证，已恢复原运行版本。",
   nonebot_plugin_apply_failed: "插件应用失败，已恢复原运行版本。",
+  external_database_manual_migration_required: "外部数据库未完成迁移，请在控制台执行 `nb orm upgrade` 后再次重启。",
+  database_migration_failed: "数据库迁移失败，SQLite备份及原运行版本已恢复。",
 }
 
 export default {
   name: "NoneBotStore",
+  props: { initialSearch: { type: String, default: "" } },
   data() {
     return {
       plugins: [], total: 0, page: 1, pageSize: 30, loading: false, error: "",
-      search: "", statusFilter: "all", typeFilter: "all", adapterFilter: "all", includeIncompatible: false,
+      search: this.initialSearch, statusFilter: "all", typeFilter: "all", adapterFilter: "all", includeIncompatible: false,
       enabledAdapters: [],
       registryMeta: {}, searchTimer: null, analysisVisible: false, analysisLoading: false,
       analysis: null, analysisPlugin: null, analysisTimer: null, applying: false,
-      confirmCode: false, confirmChanges: false, confirmSource: false, confirmCompatibility: false,
+      confirmCode: false, confirmChanges: false, confirmSource: false, confirmCompatibility: false, confirmMigration: false,
       detailVisible: false, detailLoading: false, detail: null,
       environment: null, repairing: false,
     }
@@ -343,6 +355,7 @@ export default {
       if (this.analysis?.plan?.non_core_changes?.length && !this.confirmChanges) return false
       if (this.analysis?.plan?.source_build_required && !this.confirmSource) return false
       if (this.compatibilityOverrides.length && !this.confirmCompatibility) return false
+      if (this.analysis?.plan?.database_migration_possible && !this.confirmMigration) return false
       return true
     },
     applyButtonLabel() {
@@ -359,6 +372,11 @@ export default {
   mounted() { this.loadEnvironment(); this.loadPlugins(false); this.restoreAnalysis() },
   beforeDestroy() { clearTimeout(this.searchTimer); clearTimeout(this.analysisTimer) },
   methods: {
+    newOperationId() {
+      const bytes = new Uint8Array(16)
+      window.crypto.getRandomValues(bytes)
+      return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")
+    },
     formatTime(value) { try { return new Date(value).toLocaleString("zh-CN", { hour12: false }) } catch (_) { return value } },
     typeLabel(type) { return type === "library" ? "库插件" : "应用插件" },
     adapterName(adapter) {
@@ -381,7 +399,11 @@ export default {
     },
     reasonLabel(reason) { return reasonLabels[reason?.code] || reason?.message || reason?.code || "当前环境不兼容" },
     reasonDetail(reason) { const label = reasonLabels[reason?.code]; return label && reason?.message && reason.message !== label ? reason.message : "" },
-    driftDescription(item) { const relation = { missing: "缺失", older: "版本偏低", newer: "版本偏高", version_mismatch: "版本不一致" }[item.kind] || "不一致"; return `${relation} · 期望 ${item.expected || "-"} · 实际 ${item.actual || "未安装"}` },
+    driftDescription(item) {
+      if (item.kind === "constraint_conflict") return `插件要求 ${item.expected || item.requirement || "-"} · 当前 ${item.actual || "未安装"}`
+      const relation = { missing: "缺失", older: "版本偏低", newer: "版本偏高", version_mismatch: "版本不一致" }[item.kind] || "不一致"
+      return `${relation} · 期望 ${item.expected || item.from || "-"} · 实际 ${item.actual || item.to || "未安装"}`
+    },
     async loadEnvironment() {
       try {
         const response = await this.getRequest(`${this.$root.prefix}/store/nonebot/environment`, {}, { suppressErrorToast: true })
@@ -416,7 +438,7 @@ export default {
     async startAnalysis(action, plugin) {
       if (this.$store.state.pluginOperation.active) { this.$message.warning("已有插件操作正在进行，请等待完成。"); return }
       this.analysisPlugin = plugin; this.analysis = null; this.analysisLoading = true; this.analysisVisible = true
-      this.confirmCode = false; this.confirmChanges = false; this.confirmSource = false; this.confirmCompatibility = false
+      this.confirmCode = false; this.confirmChanges = false; this.confirmSource = false; this.confirmCompatibility = false; this.confirmMigration = false
       try {
         const response = await this.postRequest(`${this.$root.prefix}/store/nonebot/analyze`, { project_link: plugin.project_link, action })
         if (!response.suc) throw new Error(response.info || "依赖分析无法启动")
@@ -476,7 +498,12 @@ export default {
       const confirmed = await this.$cuteConfirm({ title: "取消待重启事务", message: `将撤销 ${plugin.name} 的待应用变更并恢复当前运行版本。`, confirmButtonText: "撤销事务", cancelButtonText: "保留", type: "warning" })
       if (!confirmed) return
       try {
-        const response = await this.postRequest(`${this.$root.prefix}/store/nonebot/transactions/cancel`, {})
+        const endpoint = plugin.pending_operation_id
+          ? `${this.$root.prefix}/store/nonebot/transactions/pending/${encodeURIComponent(plugin.pending_operation_id)}`
+          : `${this.$root.prefix}/store/nonebot/transactions/cancel`
+        const response = plugin.pending_operation_id
+          ? await this.deleteRequest(endpoint)
+          : await this.postRequest(endpoint, {})
         if (!response.suc) throw new Error(response.info || "取消失败")
         this.$message.success("待重启插件事务已撤销")
         notifyRestartStatusChanged(); await this.loadPlugins(false)
@@ -501,12 +528,15 @@ export default {
       this.applying = true
       const action = this.analysis.action
       const labels = { install: "安装", update: "更新", uninstall: "卸载" }
+      const operationId = this.newOperationId()
+      sessionStorage.setItem("zhenxun_plugin_operation", JSON.stringify({ operationId, action, pluginName: this.analysisPlugin.name }))
       this.$store.commit("START_PLUGIN_OPERATION", { action, pluginName: this.analysisPlugin.name, title: `正在${labels[action]} NoneBot 插件`, message: "正在构建隔离依赖层并验证运行时边界。" })
       try {
         const response = await this.postRequest(`${this.$root.prefix}/store/nonebot/apply`, {
-          analysis_id: this.analysis.analysis_id, confirm_third_party_code: this.confirmCode,
+          analysis_id: this.analysis.analysis_id, operation_id: operationId, confirm_third_party_code: this.confirmCode,
           confirm_non_core_changes: this.confirmChanges, confirm_source_build: this.confirmSource,
           confirm_compatibility_overrides: this.confirmCompatibility,
+          confirm_database_migration: this.confirmMigration,
         })
         if (!response.suc) throw new Error(response.info || `${labels[action]}失败`)
         const mode = response.data.apply_mode

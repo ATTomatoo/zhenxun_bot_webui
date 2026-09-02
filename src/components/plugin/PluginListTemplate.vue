@@ -85,6 +85,15 @@
             class="flex justify-end items-center mt-3 pt-2"
             :style="{ borderTop: '1px solid var(--border-color-light)' }"
           >
+            <NormalButton
+              iconClass="readme"
+              text="帮助"
+              title="查看使用帮助"
+              base-class="hover:scale-110"
+              active-class="bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-800"
+              @click="openUsage(data)"
+            />
+
             <!-- 开关 -->
             <div class="flex items-center" title="启用或停用命令响应，不会卸载插件或释放运行时资源" @click.stop>
               <MySwitch
@@ -124,6 +133,16 @@
 
             <!-- 卸载按钮 -->
             <NormalButton
+              v-if="data.management_source === 'nonebot_store'"
+              iconClass="store"
+              text="NB商店"
+              title="前往 NoneBot 商店管理或卸载"
+              base-class="hover:scale-110"
+              active-class="bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-800"
+              @click="goToManagement(data)"
+            />
+            <NormalButton
+              v-else
               text="卸载"
               :iconClass="
                 !data.uninstall_supported ? 'uninstall-disabled' : 'uninstall-purple'
@@ -144,6 +163,24 @@
       :module="pluginModule"
       @close="closeSetting"
     />
+    <el-drawer
+      :visible.sync="usageVisible"
+      :title="usagePlugin ? `${usagePlugin.plugin_name} · 使用帮助` : '使用帮助'"
+      :size="usageDrawerSize"
+      append-to-body
+    >
+      <div class="usage-drawer">
+        <div class="usage-module">{{ usagePlugin && usagePlugin.module }}</div>
+        <pre>{{ usagePlugin && usagePlugin.usage ? usagePlugin.usage : "暂无使用说明" }}</pre>
+        <el-button
+          v-if="usagePlugin && usagePlugin.homepage"
+          type="primary"
+          plain
+          icon="el-icon-link"
+          @click="openHomepage(usagePlugin.homepage)"
+        >打开插件主页</el-button>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -162,12 +199,24 @@ export default {
       pluginModule: null,
       dialogVisible: false,
       selectedPlugins: [],
+      usageVisible: false,
+      usagePlugin: null,
     }
+  },
+  computed: {
+    usageDrawerSize() {
+      return window.innerWidth <= 680 ? "94%" : "520px"
+    },
   },
   mounted() {
     this.getPluginList()
   },
   methods: {
+    newOperationId() {
+      const bytes = new Uint8Array(16)
+      window.crypto.getRandomValues(bytes)
+      return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")
+    },
     getPluginList() {
       this.clearSelection()
       const loading = this.getLoading(".plugin-list-container")
@@ -213,6 +262,19 @@ export default {
       this.pluginModule = data.module
       this.dialogVisible = true
     },
+    openUsage(data) {
+      this.usagePlugin = data
+      this.usageVisible = true
+    },
+    openHomepage(url) {
+      if (/^https?:\/\//i.test(String(url || ""))) {
+        window.open(url, "_blank", "noopener,noreferrer")
+      }
+    },
+    goToManagement(data) {
+      if (!data.management_route) return
+      this.$router.push(data.management_route).catch(() => {})
+    },
     closeSetting(isRefresh) {
       this.dialogVisible = false
       if (isRefresh) this.getPluginList()
@@ -226,24 +288,33 @@ export default {
       })
 
       if (result) {
+        const operationId = this.newOperationId()
+        sessionStorage.setItem("zhenxun_plugin_operation", JSON.stringify({ operationId, action: "remove", pluginName: data.plugin_name }))
+        this.$store.commit("START_PLUGIN_OPERATION", { action: "remove", pluginName: data.plugin_name, title: "正在卸载插件", message: "请稍候，切换到其他页面不会中断当前操作。" })
         try {
-          this.postRequest(`${this.$root.prefix}/store/remove_plugin`, {
+          const resp = await this.postRequest(`${this.$root.prefix}/store/remove_plugin`, {
             store_key: data.store_key,
             module: data.runtime_module,
-          }).then((resp) => {
-            if (resp.suc) {
-              if (resp.warning) {
-                this.$message.warning(resp.warning)
-              } else {
-                this.$message.success(resp.info)
-                this.getPluginList()
-              }
-            } else {
-              this.$message.error(resp.info || "卸载失败")
-            }
-          })
+            operation_id: operationId,
+          }, { suppressErrorToast: true })
+          if (resp.suc) {
+            const mode = resp.data?.apply_mode
+            const pending = mode === "restart_pending"
+            this.$store.commit("FINISH_PLUGIN_OPERATION", {
+              status: mode === "failed" ? "error" : pending ? "pending" : "success",
+              title: mode === "failed" ? "插件卸载失败" : pending ? "插件卸载等待重启" : "插件卸载完成",
+              message: pending ? "插件卸载已暂存，明确重启后统一应用。" : mode === "failed" ? "卸载失败，插件文件和运行状态已保留。" : "插件已卸载并清理运行时资源。",
+              applyMode: mode,
+              restartAvailable: resp.data?.restart_available,
+              accessUrls: resp.data?.access_urls || [],
+              accessTargets: resp.data?.access_targets || [],
+            })
+            await this.getPluginList()
+          } else {
+            throw new Error(resp.info || "卸载失败")
+          }
         } catch (error) {
-          this.$message.error("卸载失败: " + error.message)
+          this.$store.commit("FINISH_PLUGIN_OPERATION", { status: "error", title: "插件卸载失败", message: error.response?.data?.detail || error.message || "卸载失败" })
         }
       } else {
         console.log("取消卸载")
@@ -288,6 +359,31 @@ export default {
     linear-gradient(to bottom right, var(--bg-color), var(--bg-color-secondary));
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   min-height: 140px;
+}
+
+.usage-drawer {
+  padding: 0 22px 32px;
+  color: var(--text-color);
+}
+
+.usage-module {
+  margin-bottom: 14px;
+  color: var(--text-color-secondary);
+  font-family: Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.usage-drawer pre {
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-color);
+  background: var(--bg-color-secondary);
+  font-family: inherit;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .plugin-card .button-row {

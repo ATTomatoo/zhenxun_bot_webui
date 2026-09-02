@@ -3,7 +3,7 @@
     <div class="configuration-toolbar">
       <div>
         <h2>运行配置</h2>
-        <p>常用环境参数需要重启生效，插件配置保存后立即热加载。</p>
+        <p>运行时配置会直接应用；监听、协议和未知自定义变量需要重启。</p>
       </div>
       <el-button icon="el-icon-refresh" @click="loadSummary">重新加载</el-button>
     </div>
@@ -19,12 +19,32 @@
                 <el-input-number v-else-if="field.type === 'number'" v-model="envFields[field.key]" :min="1" :max="65535" controls-position="right" class="full-control" :disabled="fieldDisabled(field)" />
                 <el-input v-else v-model="envFields[field.key]" :placeholder="field.placeholder" :disabled="fieldDisabled(field)" />
                 <div class="field-help">{{ field.help }}</div>
+                <el-tag size="mini" :type="effectMeta(envFieldEffects[field.key]).type">{{ effectMeta(envFieldEffects[field.key]).label }}</el-tag>
               </el-form-item>
             </div>
           </section>
+          <section class="env-field-group custom-env-section">
+            <header class="custom-env-heading">
+              <div><h3>自定义环境变量</h3><p>用于第三方插件或外部服务。未知变量保存后需要重启生效。</p></div>
+              <el-button size="small" icon="el-icon-plus" @click="addCustomEnv">添加变量</el-button>
+            </header>
+            <div v-if="customEnv.length" class="custom-env-list">
+              <div v-for="(item, index) in customEnv" :key="item.clientId" class="custom-env-row" :class="{ deleted: item.deleted }">
+                <el-input v-model="item.key" placeholder="变量名称" :disabled="!item.isNew || item.deleted" @input="markEnvDirty" />
+                <el-input v-if="!item.sensitive || item.replacing || item.isNew" v-model="item.value" :type="item.sensitive ? 'password' : 'text'" :show-password="item.sensitive" placeholder="变量值" :disabled="item.deleted" @input="markEnvDirty" />
+                <div v-else class="secret-configured"><i class="el-icon-lock"></i><span>已配置，值不会回传</span></div>
+                <el-tag size="mini" type="warning">需要重启</el-tag>
+                <el-button v-if="item.sensitive && !item.isNew && !item.replacing && !item.deleted" size="small" @click="beginSecretReplace(item)">替换</el-button>
+                <el-button v-if="item.deleted" size="small" @click="restoreCustomEnv(item)">撤销</el-button>
+                <el-button v-else type="danger" plain size="small" icon="el-icon-delete" @click="removeCustomEnv(item, index)">删除</el-button>
+              </div>
+            </div>
+            <div v-else class="custom-env-empty">尚未配置自定义环境变量</div>
+            <div v-if="customEnvError" class="inline-error">{{ customEnvError }}</div>
+          </section>
         </el-form>
         <div class="action-bar">
-          <span>{{ launcherManaged ? "保存后可确认由 launcher 重启" : "保存后需要手动重启" }}</span>
+          <span>{{ envSaveHint }}</span>
           <el-button type="primary" :loading="saving === 'env'" @click="saveEnv">保存环境配置</el-button>
         </div>
       </el-tab-pane>
@@ -93,7 +113,7 @@ export default {
   components: { SchemaForm },
   data() {
     return {
-      loading: false, saving: "", validating: false, section: "env", envRevision: "", simpleRevision: "", envFields: {}, originalEnvFields: {}, groups: [], simpleChanges: {}, groupSearch: "", selectedGroup: "", launcherManaged: false,
+      loading: false, saving: "", validating: false, section: "env", envRevision: "", simpleRevision: "", envFields: {}, originalEnvFields: {}, envFieldEffects: {}, customEnv: [], originalCustomEnv: [], customEnvError: "", customEnvSequence: 0, groups: [], simpleChanges: {}, groupSearch: "", selectedGroup: "", launcherManaged: false,
       rawFile: "env", rawContent: "", rawOriginal: "", rawRevision: "", rawError: "", rawIssues: [], rawLoaded: {}, pluginInvalidPaths: [], pluginIssues: [],
       envFieldDefinitions: [
         { key: "HOST", label: "监听地址", placeholder: "0.0.0.0", help: "0.0.0.0 允许局域网访问，127.0.0.1 仅本机访问。" },
@@ -108,9 +128,12 @@ export default {
         { key: "NICKNAME", label: "机器人昵称", placeholder: "[\"真寻\"]", help: "使用 dotenv 支持的列表格式。" },
         { key: "SELF_NICKNAME", label: "回复昵称", placeholder: "真寻", help: "回复消息中使用的自称。" },
         { key: "COMMAND_START", label: "命令前缀", placeholder: "[\"/\"]", help: "支持多个命令前缀。" },
+        { key: "COMMAND_SEP", label: "命令分隔符", placeholder: "[\".\"]", help: "修改后会重建受影响的命令注册。" },
+        { key: "ALCONNA_USE_COMMAND_START", label: "Alconna 使用命令前缀", type: "switch", help: "修改后会重载受影响的 Alconna 插件。" },
         { key: "SUPERUSERS", label: "超级用户", placeholder: "[\"123456\"]", help: "平台用户 ID 列表。" },
+        { key: "PLATFORM_SUPERUSERS", label: "平台超级用户", placeholder: "{\"qq\":[\"123456\"]}", help: "按平台分别配置超级用户。" },
         { key: "SESSION_EXPIRE_TIMEOUT", label: "会话超时", placeholder: "120", help: "交互会话的超时秒数。" },
-        { key: "IMAGE_TO_BYTES", label: "图片字节发送", placeholder: "False", help: "仅在适配器需要时开启。" },
+        { key: "IMAGE_TO_BYTES", label: "图片字节发送", type: "switch", help: "仅在适配器需要时开启。" },
         { key: "EXT_PATH", label: "扩展插件路径", placeholder: "[]", help: "额外插件目录列表。" },
       ],
     }
@@ -121,6 +144,24 @@ export default {
         { title: "WebUI 访问与 HTTPS", description: "配置监听地址、端口、TLS 证书和可选的 HTTP 308 跳转。", fields: this.envFieldDefinitions.slice(0, 7) },
         { title: "机器人运行环境", description: "配置日志、代理、昵称、权限和插件加载路径。", fields: this.envFieldDefinitions.slice(7) },
       ]
+    },
+    customOperations() {
+      const original = new Map(this.originalCustomEnv.map((item) => [item.key, item]))
+      const operations = []
+      this.customEnv.forEach((item) => {
+        if (item.deleted && !item.isNew) operations.push({ key: item.key, operation: "delete" })
+        else if (item.isNew && item.key.trim()) operations.push({ key: item.key.trim(), operation: "set", value: item.value || "" })
+        else if (item.replacing) operations.push({ key: item.key, operation: "set", value: item.value || "" })
+        else if (!item.sensitive && original.get(item.key)?.value !== item.value) operations.push({ key: item.key, operation: "set", value: item.value || "" })
+      })
+      return operations
+    },
+    envSaveHint() {
+      const changedKeys = Object.keys(this.changedEnvFields())
+      const needsRestart = this.customOperations.length > 0 || changedKeys.some((key) => this.envFieldEffects[key] === "restart_required")
+      if (!changedKeys.length && !this.customOperations.length) return "仅实际变化会触发运行时操作"
+      if (!needsRestart) return "保存后立即应用，必要时只重载相关插件或服务"
+      return this.launcherManaged ? "包含启动期配置，保存后可选择立即重启" : "包含启动期配置，保存后需要手动重启"
     },
     rawReady() { return Boolean(this.rawLoaded[this.rawFile] && /^[a-f0-9]{64}$/.test(this.rawRevision)) },
     filteredGroups() {
@@ -155,6 +196,17 @@ export default {
       })
       return result
     },
+    effectMeta(effect) {
+      return {
+        hot_reload: { label: "立即生效", type: "success" },
+        plugin_reload: { label: "重载插件", type: "success" },
+        service_reload: { label: "重建服务", type: "success" },
+        restart_required: { label: "需要重启", type: "warning" },
+      }[effect] || { label: "需要重启", type: "warning" }
+    },
+    normalizeCustomEnv(items) {
+      return (items || []).map((item) => ({ ...item, clientId: `env-${++this.customEnvSequence}`, value: item.value || "", replacing: false, deleted: false, isNew: false }))
+    },
     fieldDisabled(field) { return Boolean((field.dependsOn && !this.envFields[field.dependsOn]) || (field.launcherOnly && !this.launcherManaged && !(field.type === "switch" && this.envFields[field.key]))) },
     normalizeGroups(groups) {
       return (groups || []).filter((group) => group.module !== "AI").map((group) => ({ ...group, fields: group.fields.map((field) => ({ ...field })) }))
@@ -167,12 +219,17 @@ export default {
         this.envRevision = response.data.env.revision
         this.envFields = this.normalizedEnvFields(response.data.env.fields)
         this.originalEnvFields = this.normalizedEnvFields(response.data.env.fields)
+        this.envFieldEffects = response.data.env.field_effects || {}
+        this.customEnv = this.normalizeCustomEnv(response.data.env.custom_env)
+        this.originalCustomEnv = this.customEnv.map((item) => ({ ...item }))
+        this.customEnvError = ""
         this.simpleRevision = response.data.simple.revision
         this.groups = this.normalizeGroups(response.data.simple.groups)
         if (!this.groups.some((group) => group.module === this.selectedGroup)) this.selectedGroup = this.groups[0]?.module || ""
         this.pluginInvalidPaths = []; this.pluginIssues = []
         this.simpleChanges = {}
         clearDirtyState("plugin-configuration")
+        clearDirtyState("environment-configuration")
         this.launcherManaged = response.data.launcher_managed
       } catch (error) { this.$message.error(error.message || "配置摘要加载失败") }
       finally { this.loading = false }
@@ -199,16 +256,29 @@ export default {
       this.envFieldDefinitions.forEach(({ key }) => { if (this.envFields[key] !== this.originalEnvFields[key]) changed[key] = this.envFields[key] == null ? "" : this.envFields[key] })
       return changed
     },
+    addCustomEnv() { this.customEnv.push({ clientId: `env-${++this.customEnvSequence}`, key: "", value: "", sensitive: false, configured: false, replacing: false, deleted: false, isNew: true }); this.markEnvDirty() },
+    beginSecretReplace(item) { item.replacing = true; item.value = ""; this.markEnvDirty() },
+    removeCustomEnv(item, index) { if (item.isNew) this.customEnv.splice(index, 1); else item.deleted = true; this.markEnvDirty() },
+    restoreCustomEnv(item) { item.deleted = false; this.markEnvDirty() },
+    validateCustomEnv() {
+      const active = this.customEnv.filter((item) => !item.deleted)
+      const keys = active.map((item) => item.key.trim())
+      if (keys.some((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return "变量名称只能包含字母、数字和下划线，且不能以数字开头。"
+      if (new Set(keys.map((key) => key.toLowerCase())).size !== keys.length) return "自定义环境变量名称不能重复。"
+      return ""
+    },
+    markEnvDirty() { this.customEnvError = this.validateCustomEnv(); setDirtyState("environment-configuration", Object.keys(this.changedEnvFields()).length > 0 || this.customOperations.length > 0) },
     async saveEnv() {
       const fields = this.changedEnvFields()
-      if (!Object.keys(fields).length) return this.$message.info("没有需要保存的环境配置。")
+      this.customEnvError = this.validateCustomEnv()
+      if (this.customEnvError) return
+      const customOperations = this.customOperations
+      if (!Object.keys(fields).length && !customOperations.length) return this.$message.info("没有需要保存的环境配置。")
       this.saving = "env"
       try {
-        const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/env`, { expected_revision: this.envRevision, fields })
+        const response = await this.putRequest(`${this.$root.prefix}/system/configuration/files/env`, { expected_revision: this.envRevision, fields, custom_operations: customOperations })
         if (!response.suc) throw new Error(response.info)
-        this.envRevision = response.data.revision
-        this.originalEnvFields = { ...this.envFields }
-        clearDirtyState("environment-configuration")
+        await this.loadSummary()
         await handleApplyResult(this, response, {
           restartRequest: () => this.postRequest(`${this.$root.prefix}/system/configuration/restart`, {}),
           returnRoute: "/system",
@@ -267,7 +337,8 @@ export default {
   watch: {
     section(value) { if (value === "raw" && !this.rawLoaded[this.rawFile]) this.loadRaw(this.rawFile) },
     selectedGroup() { this.pluginInvalidPaths = [] },
-    envFields: { deep: true, handler() { setDirtyState("environment-configuration", Object.keys(this.changedEnvFields()).length > 0) } },
+    envFields: { deep: true, handler() { this.markEnvDirty() } },
+    customEnv: { deep: true, handler() { this.markEnvDirty() } },
     rawContent(value) { setDirtyState("raw-configuration", Boolean(this.rawReady && value !== this.rawOriginal)) },
   },
 }
@@ -278,5 +349,6 @@ export default {
 .env-form { display: flex; flex-direction: column; gap: 18px; }.env-field-group { padding: 16px 18px 2px; border: 1px solid var(--border-color); border-radius: 8px; }.env-field-group > header { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color-light); }.env-field-group h3 { margin: 0; font-size: 16px; }.env-field-group header p { margin: 5px 0 0; color: var(--text-color-secondary); font-size: 12px; }.env-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }.field-help { margin-top: 5px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; }.plugin-config-workbench { display: grid; height: clamp(360px, calc(100vh - 370px), 680px); grid-template-columns: 230px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border-color); border-radius: 8px; }.config-groups { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 14px; overflow-y: auto; border-right: 1px solid var(--border-color); }.config-groups .el-input { margin-bottom: 8px; }.config-groups button { display: flex; min-height: 54px; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; color: var(--text-color); background: transparent; text-align: left; cursor: pointer; }.config-groups button:hover { background: var(--bg-color-hover); }.config-groups button.active { border-color: var(--primary-color); background: var(--bg-color-hover); }.config-groups button strong, .config-groups button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.config-groups button span { margin-top: 3px; color: var(--text-color-secondary); font-size: 11px; }.current-config-group { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 18px 20px 0; }.config-form-scroll { min-height: 0; flex: 1; padding-right: 5px; overflow-y: auto; }.group-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color-light); }.group-heading h3 { margin: 0; font-size: 18px; }.group-heading p { margin: 4px 0 0; color: var(--text-color-secondary); font-size: 12px; }.group-empty, .current-config-empty { color: var(--text-color-secondary); text-align: center; }.group-empty { padding: 24px 4px; }.current-config-empty { display: grid; place-content: center; }.current-config-empty i { font-size: 36px; }.sensitive-placeholder { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px; border: 1px dashed var(--border-color); border-radius: 5px; color: var(--text-color-secondary); }
 .action-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 16px; padding: 12px 0; border-top: 1px solid var(--border-color); background: var(--bg-color-secondary); }.config-action-bar { position: static; flex: none; margin-top: 8px; }.action-bar span { margin-right: auto; color: var(--text-color-secondary); font-size: 12px; }.raw-switch { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 10px; }.raw-editor ::v-deep textarea { font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.55; }.inline-error { margin-top: 8px; color: var(--el-color-danger); }
 .validation-issues { margin: 10px 0 0; padding: 10px 14px 10px 34px; border: 1px solid rgba(224,82,96,.35); border-radius: 6px; color: var(--danger-color); background: rgba(224,82,96,.06); }.validation-issues li { margin: 4px 0; line-height: 1.55; }.validation-issues code { margin-right: 8px; }
-@media (max-width: 760px) { .env-field-grid { grid-template-columns: 1fr; }.env-field-group { padding: 14px 14px 2px; }.configuration-toolbar { align-items: flex-start; }.plugin-config-workbench { grid-template-columns: 1fr; }.config-groups { display: grid; max-height: 240px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border-color); }.config-groups .el-input { grid-column: 1 / -1; }.current-config-group { padding: 14px; }.group-heading { align-items: flex-start; flex-direction: column; }.action-bar { flex-wrap: wrap; }.action-bar span { width: 100%; }.raw-switch { gap: 10px; } }
+.custom-env-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }.custom-env-list { display: flex; flex-direction: column; gap: 10px; padding-bottom: 16px; }.custom-env-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.4fr) auto auto auto; align-items: center; gap: 9px; }.custom-env-row.deleted { opacity: .58; }.secret-configured { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-color-secondary); }.custom-env-empty { padding: 8px 0 20px; color: var(--text-color-secondary); text-align: center; }
+@media (max-width: 760px) { .env-field-grid { grid-template-columns: 1fr; }.env-field-group { padding: 14px 14px 2px; }.configuration-toolbar, .custom-env-heading { align-items: flex-start; flex-direction: column; }.custom-env-row { grid-template-columns: 1fr auto; }.custom-env-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }.plugin-config-workbench { grid-template-columns: 1fr; }.config-groups { display: grid; max-height: 240px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border-color); }.config-groups .el-input { grid-column: 1 / -1; }.current-config-group { padding: 14px; }.group-heading { align-items: flex-start; flex-direction: column; }.action-bar { flex-wrap: wrap; }.action-bar span { width: 100%; }.raw-switch { gap: 10px; } }
 </style>

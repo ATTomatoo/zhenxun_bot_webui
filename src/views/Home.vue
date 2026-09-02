@@ -190,6 +190,12 @@
 
           <!-- 右侧功能区 -->
           <div class="flex items-center space-x-4">
+            <el-tooltip :content="startupSummary.detail" placement="bottom">
+              <span class="startup-status" :class="`is-${startupSummary.status}`">
+                <i></i>
+                <span class="hidden lg:inline">{{ startupSummary.label }}</span>
+              </span>
+            </el-tooltip>
             <el-tooltip :content="socketSummary.detail" placement="bottom">
               <span class="socket-status" :class="`is-${socketSummary.status}`">
                 <i></i><span class="hidden lg:inline">{{ socketSummary.label }}</span>
@@ -388,6 +394,8 @@ export default {
       logoUrl,
       menuSearch: "",
       socketStates: { status: "connecting", log: "idle", chat: "idle" },
+      startupStatus: { state: "starting", stages: {}, errors: [] },
+      startupPollTimer: null,
       asideShow: false,
       isCollapsed: false,
       isMobile: false,
@@ -482,6 +490,14 @@ export default {
       }
       return { status: "warning", label: "正在连接", detail: "正在建立WebUI状态通道" }
     },
+    startupSummary() {
+      const state = this.startupStatus.state || "starting"
+      if (state === "warmup_ready") return { status: "ok", label: "全部就绪", detail: "运行时、渲染与AI预热均已完成" }
+      if (state === "runtime_ready") return { status: "warning", label: "服务预热", detail: "Bot运行时已就绪，渲染与AI服务正在预热" }
+      if (state === "degraded") return { status: "warning", label: "部分降级", detail: `启动完成，但有 ${this.startupStatus.errors?.length || 1} 项能力预热失败` }
+      if (state === "failed") return { status: "danger", label: "启动异常", detail: "Bot运行时初始化失败，管理功能仍可用于诊断" }
+      return { status: "warning", label: "运行时初始化", detail: "WebUI与数据库已可用，Bot事件暂不处理" }
+    },
     restartTooltip() {
       if (this.pendingRestartCount) return `有 ${this.pendingRestartCount} 项修改等待重启应用`
       return this.restartAvailable
@@ -495,6 +511,8 @@ export default {
   mounted() {
     this.getMenus()
     this.loadRestartStatus()
+    this.loadStartupStatus()
+    this.restorePluginOperation()
     this.$store.dispatch("initStatusSocket")
     window.addEventListener("resize", this.handleResize)
     window.addEventListener("zhenxun-websocket-state", this.handleSocketState)
@@ -510,9 +528,64 @@ export default {
     window.removeEventListener("zhenxun-websocket-state", this.handleSocketState)
     window.removeEventListener("zhenxun-auth-expired", this.closeSockets)
     window.removeEventListener("zhenxun-restart-status-changed", this.loadRestartStatus)
+    if (this.startupPollTimer) window.clearTimeout(this.startupPollTimer)
   },
   inject: ["setAppTheme"],
   methods: {
+    async loadStartupStatus() {
+      if (this.startupPollTimer) window.clearTimeout(this.startupPollTimer)
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/system/startup/status`, {}, { suppressErrorToast: true })
+        if (response?.suc && response.data) this.startupStatus = response.data
+      } catch (error) {
+        this.startupStatus = { state: "failed", stages: {}, errors: [{ code: "status_unavailable" }] }
+      }
+      if (!["warmup_ready", "degraded", "failed"].includes(this.startupStatus.state)) {
+        this.startupPollTimer = window.setTimeout(this.loadStartupStatus, 1200)
+      }
+    },
+    async restorePluginOperation() {
+      let saved
+      try { saved = JSON.parse(sessionStorage.getItem("zhenxun_plugin_operation") || "null") } catch (error) { saved = null }
+      if (!saved?.operationId) return
+      const context = { action: saved.action || "install", pluginName: saved.pluginName || "插件" }
+      try {
+        const response = await this.getRequest(`${this.$root.prefix}/store/operations/${saved.operationId}`, {}, { suppressErrorToast: true })
+        if (response?.suc && response.data) {
+          const entry = response.data
+          if (entry.status === "running") {
+            this.$store.commit("START_PLUGIN_OPERATION", { ...context, title: "插件操作仍在进行", message: "页面已恢复操作进度，请等待后端完成。" })
+            return
+          }
+          const result = entry.result || {}
+          const pending = result.apply_mode === "restart_pending"
+          this.$store.commit("START_PLUGIN_OPERATION", { ...context, title: "插件操作结果", message: "正在恢复上次操作结果。" })
+          this.$store.commit("FINISH_PLUGIN_OPERATION", {
+            status: result.apply_mode === "failed" ? "error" : pending ? "pending" : "success",
+            title: result.apply_mode === "failed" ? "插件操作失败" : pending ? "插件事务等待重启" : "插件操作完成",
+            message: pending ? "插件修改已暂存，明确重启后统一应用。" : result.apply_mode === "failed" ? "操作失败，运行版本已保留或回滚。" : "插件运行时变更已经生效。",
+            applyMode: result.apply_mode,
+            restartAvailable: result.restart_available,
+            accessUrls: result.access_urls || [],
+            accessTargets: result.access_targets || [],
+          })
+          return
+        }
+        const pendingResponse = await this.getRequest(`${this.$root.prefix}/store/transactions/pending`, {}, { suppressErrorToast: true })
+        const operations = [
+          ...(pendingResponse?.data?.zhenxun?.operations || []),
+          ...(pendingResponse?.data?.nonebot?.operations || []),
+        ]
+        if (operations.some((item) => item.operation_id === saved.operationId)) {
+          this.$store.commit("START_PLUGIN_OPERATION", { ...context, title: "插件事务等待重启", message: "插件修改已暂存，明确重启后统一应用。" })
+          this.$store.commit("FINISH_PLUGIN_OPERATION", { status: "pending", title: "插件事务等待重启", message: "插件修改已暂存，明确重启后统一应用。", applyMode: "restart_pending", restartAvailable: this.restartAvailable })
+          return
+        }
+      } catch (error) {
+        return
+      }
+      sessionStorage.removeItem("zhenxun_plugin_operation")
+    },
     handleSocketState(event) {
       const channel = event.detail?.channel
       if (channel && Object.prototype.hasOwnProperty.call(this.socketStates, channel)) {
@@ -859,7 +932,8 @@ export default {
   background: var(--bg-color);
 }
 
-.socket-status {
+.socket-status,
+.startup-status {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -868,16 +942,20 @@ export default {
   white-space: nowrap;
 }
 
-.socket-status i {
+.socket-status i,
+.startup-status i {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--el-color-warning);
 }
 
-.socket-status.is-ok i {
+.socket-status.is-ok i,
+.startup-status.is-ok i {
   background: var(--el-color-success);
 }
+
+.startup-status.is-danger i { background: var(--el-color-danger); }
 
 ::v-deep .el-menu-item:hover {
   background-color: var(--bg-color-hover) !important;

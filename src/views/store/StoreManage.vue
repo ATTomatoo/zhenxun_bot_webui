@@ -7,7 +7,7 @@
       </el-radio-group>
     </div>
     <StoreTemplate v-if="source === 'zhenxun'" />
-    <NoneBotStore v-else />
+    <NoneBotStore v-else :initial-search="$route.query.search || ''" />
   </div>
 </template>
 
@@ -18,7 +18,16 @@ import NoneBotStore from "@/components/store/NoneBotStore.vue"
 export default {
   name: "StoreManage",
   components: { NoneBotStore, StoreTemplate },
-  data() { return { source: "zhenxun" } },
+  data() {
+    return { source: this.$route.query.source === "nonebot" ? "nonebot" : "zhenxun" }
+  },
+  watch: {
+    source(value) {
+      const query = { ...this.$route.query, source: value }
+      if (value !== "nonebot") delete query.search
+      this.$router.replace({ path: "/store", query }).catch(() => {})
+    },
+  },
 }
 </script>
 
