@@ -158,7 +158,7 @@ export default {
     },
     envSaveHint() {
       const changedKeys = Object.keys(this.changedEnvFields())
-      const needsRestart = this.customOperations.length > 0 || changedKeys.some((key) => this.envFieldEffects[key] === "restart_required")
+      const needsRestart = this.customOperations.length > 0 || changedKeys.some((key) => ["restart_required", "worker_restart"].includes(this.envFieldEffects[key]))
       if (!changedKeys.length && !this.customOperations.length) return "仅实际变化会触发运行时操作"
       if (!needsRestart) return "保存后立即应用，必要时只重载相关插件或服务"
       return this.launcherManaged ? "包含启动期配置，保存后可选择立即重启" : "包含启动期配置，保存后需要手动重启"
@@ -198,6 +198,10 @@ export default {
     },
     effectMeta(effect) {
       return {
+        in_place: { label: "立即生效", type: "success" },
+        component_restart: { label: "重建组件", type: "success" },
+        plugin_reactivate: { label: "重载插件", type: "success" },
+        worker_restart: { label: "需要重启", type: "warning" },
         hot_reload: { label: "立即生效", type: "success" },
         plugin_reload: { label: "重载插件", type: "success" },
         service_reload: { label: "重建服务", type: "success" },

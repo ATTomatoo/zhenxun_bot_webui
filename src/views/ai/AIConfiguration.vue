@@ -87,7 +87,7 @@
               :title="selectedProbeResult.message"
             />
 
-            <section v-if="!providerDraft.isNew" class="models-section">
+            <section class="models-section">
               <div class="subheading"><div><h3>模型</h3><p>模型列表与服务商连接参数独立保存。</p></div><el-button size="small" icon="el-icon-plus" @click="openModelEditor()">手动添加</el-button></div>
               <el-input v-model="modelSearch" clearable prefix-icon="el-icon-search" placeholder="搜索模型" class="model-search" />
               <div class="model-list">
@@ -97,7 +97,11 @@
                 </div>
                 <div v-if="!filteredModels.length" class="empty-copy">没有匹配的模型</div>
               </div>
-              <div class="models-save"><span v-if="modelsDirty">模型列表有未保存修改</span><el-button type="primary" icon="el-icon-check" :loading="saving === 'models'" :disabled="!modelsDirty" @click="saveModels">保存模型列表</el-button></div>
+              <div class="models-save">
+                <span v-if="modelsDirty">模型列表有未保存修改</span>
+                <span v-if="providerDraft.isNew">模型将随服务商一并保存</span>
+                <el-button v-else type="primary" icon="el-icon-check" :loading="saving === 'models'" :disabled="!modelsDirty" @click="saveModels">保存模型列表</el-button>
+              </div>
             </section>
           </main>
           <main v-else class="provider-empty"><i class="el-icon-connection"></i><p>选择或添加一个 AI 服务商</p></main>
@@ -296,7 +300,11 @@ export default {
     async selectProvider(name) { if ((this.providerDirty || this.modelsDirty) && !(await this.confirmDiscard())) return; this.selectedProviderName = name; this.providerDirty = false; this.modelsDirty = false; this.resetProviderDraft(); this.syncDirty() },
     async confirmDiscard() { try { await this.$confirm("当前 AI 配置有尚未保存的修改。", "放弃修改？", { confirmButtonText: "放弃修改", cancelButtonText: "继续编辑", type: "warning" }); return true } catch (_) { return false } },
     async createProvider() { if ((this.providerDirty || this.modelsDirty) && !(await this.confirmDiscard())) return; this.selectedProviderName = ""; this.providerDraft = { name: "", api_type: "openai", api_base: "", timeout: 180, temperature: null, max_output_tokens: null, api_key_slots: [{ existing_index: null, value: "", clientId: uid() }], models: [], discovery_supported: true, isNew: true }; this.providerDirty = true; this.modelsDirty = false; this.syncDirty() },
-    markProviderDirty() { this.providerDirty = true; this.syncDirty() },
+    invalidateProbeResults() {
+      const key = this.selectedProviderName || "__new__"
+      if (this.providerProbeResults[key]) this.$delete(this.providerProbeResults, key)
+    },
+    markProviderDirty() { this.providerDirty = true; this.invalidateProbeResults(); this.syncDirty() },
     handleApiTypeChange(value) { if (!this.providerDraft.api_base && this.defaultApiBases[value]) this.providerDraft.api_base = this.defaultApiBases[value]; this.markProviderDirty() },
     addKey() { this.providerDraft.api_key_slots.push({ existing_index: null, value: "", clientId: uid() }); this.markProviderDirty() },
     removeKey(index) { this.providerDraft.api_key_slots.splice(index, 1); this.markProviderDirty() },
@@ -342,15 +350,37 @@ export default {
       }
       return states[provider.discovery_status] || { label: "状态待确认", type: "info" }
     },
-    addDiscoveredModels() { const exists = new Set(this.providerDraft.models.map((item) => item.model_name)); let added = 0; this.selectedDiscovered.forEach((name) => { if (!exists.has(name)) { this.providerDraft.models.push({ ...emptyModel(), model_name: name }); exists.add(name); added += 1 } }); this.modelsDirty = this.modelsDirty || added > 0; this.discoveryDialog = false; this.syncDirty() },
+    addDiscoveredModels() { const exists = new Set(this.providerDraft.models.map((item) => item.model_name)); let added = 0; this.selectedDiscovered.forEach((name) => { if (!exists.has(name)) { this.providerDraft.models.push({ ...emptyModel(), model_name: name }); exists.add(name); added += 1 } }); this.modelsDirty = this.modelsDirty || added > 0; if (added) this.invalidateProbeResults(); this.discoveryDialog = false; this.syncDirty() },
     openModelEditor(model = null, index = null) { this.modelDraft = model ? { ...clone(model), capabilities: undefined } : emptyModel(); this.modelEditIndex = index; this.modelDialog = true },
-    confirmModel() { if (!this.modelDraft.model_name.trim()) return this.$message.warning("请填写模型名称。"); const value = { ...this.modelDraft, model_name: this.modelDraft.model_name.trim() }; delete value.capabilities; if (this.modelEditIndex == null) this.providerDraft.models.push(value); else this.providerDraft.models.splice(this.modelEditIndex, 1, value); this.modelsDirty = true; this.modelDialog = false; this.syncDirty() },
+    confirmModel() { if (!this.modelDraft.model_name.trim()) return this.$message.warning("请填写模型名称。"); const value = { ...this.modelDraft, model_name: this.modelDraft.model_name.trim() }; delete value.capabilities; if (this.modelEditIndex == null) this.providerDraft.models.push(value); else this.providerDraft.models.splice(this.modelEditIndex, 1, value); this.modelsDirty = true; this.invalidateProbeResults(); this.modelDialog = false; this.syncDirty() },
     modelIndex(model) { return this.providerDraft.models.findIndex((item) => item === model || item.model_name === model.model_name) },
-    deleteModel(model) { const actual = this.modelIndex(model); if (actual < 0) return; this.providerDraft.models.splice(actual, 1); this.modelsDirty = true; this.syncDirty() },
+    deleteModel(model) { const actual = this.modelIndex(model); if (actual < 0) return; this.providerDraft.models.splice(actual, 1); this.modelsDirty = true; this.invalidateProbeResults(); this.syncDirty() },
     async saveModels() { this.saving = "models"; try { const models = this.providerDraft.models.map(({ capabilities, ...model }) => model); const response = await this.putRequest(`${this.$root.prefix}/ai/providers/${encodeURIComponent(this.selectedProviderName)}/models`, { expected_revision: this.revision, models }); if (!response.suc) throw new Error(response.info); this.applyConfiguration(response.data, this.selectedProviderName); await this.handleAiApply(response) } catch (error) { this.captureOperationError(error, "模型列表保存失败。") } finally { this.saving = "" } },
     capabilityTags(model) { const caps = model.capabilities || {}; const result = []; if (caps.is_embedding_model) result.push("Embedding"); if (caps.is_rerank_model) result.push("Rerank"); if ((caps.output_modalities || []).includes("image")) result.push("图像"); if ((caps.output_modalities || []).includes("audio")) result.push("语音"); if (caps.supports_tool_calling) result.push("工具"); return result.slice(0, 3) },
     modelTask(model) { const caps = model.capabilities || {}; if (caps.is_embedding_model || model.task_type === "embedding") return "embedding"; if (caps.is_rerank_model || model.task_type === "rerank") return "rerank"; if ((caps.output_modalities || []).includes("image") || model.task_type === "image_generation") return "image"; if ((caps.output_modalities || []).includes("audio") || model.task_type === "tts") return "tts"; return "chat" },
-    async testModel(model) { const task = this.modelTask(model); try { await this.$confirm(`将对 ${this.selectedProviderName}/${model.model_name} 发起一次最小 ${task} 请求，可能产生费用。`, "确认模型测试", { type: "warning" }) } catch (_) { return } try { const response = await this.postRequest(`${this.$root.prefix}/ai/models/test`, { model: `${this.selectedProviderName}/${model.model_name}`, task, confirmed_paid_request: true }, { suppressErrorToast: true }); this.$message.success(`连接成功，延迟 ${response.data.latency_ms} ms`) } catch (error) { this.$message.error(apiErrorDetail(error, "模型测试失败。")) } },
+    async testModel(model) {
+      const task = this.modelTask(model)
+      const providerName = this.providerDraft.name.trim() || this.selectedProviderName
+      if (!providerName) return this.$message.warning("请先填写服务商名称。")
+      try { await this.$confirm(`将对 ${providerName}/${model.model_name} 发起一次最小 ${task} 请求，可能产生费用。`, "确认模型测试", { type: "warning" }) } catch (_) { return }
+      try {
+        const temporaryKey = this.providerDraft.api_key_slots.find((slot) => String(slot.value || "").trim())?.value || null
+        const { capabilities, ...modelConfig } = model
+        const response = await this.postRequest(`${this.$root.prefix}/ai/models/test`, {
+          model: `${providerName}/${model.model_name}`,
+          provider_name: providerName,
+          saved_provider_name: this.providerDraft.isNew ? null : this.selectedProviderName,
+          api_type: this.providerDraft.api_type,
+          api_base: this.providerDraft.api_base,
+          api_key: temporaryKey,
+          timeout: this.providerDraft.timeout,
+          model_config: modelConfig,
+          task,
+          confirmed_paid_request: true,
+        }, { suppressErrorToast: true })
+        this.$message.success(`连接成功，延迟 ${response.data.latency_ms} ms`)
+      } catch (error) { this.$message.error(apiErrorDetail(error, "模型测试失败。")) }
+    },
     async loadPersona() {
       this.personaLoading = true
       try {
