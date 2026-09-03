@@ -99,6 +99,7 @@ export default {
             const payload = await this.readStatus(baseUrl)
             const bootId = payload && payload.data && payload.data.boot_id
             if (!bootId || bootId === this.state.bootId) continue
+            if (payload.data.transaction_verification_pending) continue
             this.finish(baseUrl)
             return
           } catch (error) {

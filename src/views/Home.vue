@@ -388,6 +388,16 @@
           <strong>{{ startupSummary.label }}</strong>
           <span>{{ startupElapsed }}</span>
         </div>
+        <div class="startup-report-row">
+          <span>运行模式</span>
+          <strong :class="{ 'is-failed': startupOperatingMode === 'management_only' }">
+            {{ startupOperatingMode === "management_only" ? "仅管理面" : "正常" }}
+          </strong>
+        </div>
+        <div class="startup-report-row">
+          <span>Bot 事件入口</span>
+          <strong>{{ startupReport.accepts_bot_events ? "开放" : "关闭" }}</strong>
+        </div>
         <div v-if="startupReport.current_operation" class="startup-current-operation">
           <span>当前事务</span>
           <strong>{{ operationLabel(startupReport.current_operation) }}</strong>
@@ -420,6 +430,109 @@
           <div v-if="startupReport.load_plan.failed_plugins?.length" class="startup-failures">
             {{ startupReport.load_plan.failed_plugins.join("、") }}
           </div>
+        </section>
+        <section v-if="lifecycleStatus.component_count" class="startup-report-section">
+          <h3>生命周期</h3>
+          <div class="startup-report-row">
+            <span>组件就绪</span>
+            <strong>{{ lifecycleReadyCount }} / {{ lifecycleStatus.component_count }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>活动资源</span>
+            <strong>{{ lifecycleActiveResources }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>当前变更</span>
+            <strong>{{ lifecycleStatus.current_mutation?.kind || "无" }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>活动作用域</span>
+            <strong>{{ lifecycleStatus.active_scope_count || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>后台操作</span>
+            <strong>{{ lifecycleStatus.operation_registry?.active_count || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>所有权覆盖</span>
+            <strong>{{ lifecycleStatus.ownership?.coverage_percent ?? 100 }}%</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>文件监听</span>
+            <strong>
+              {{ lifecycleStatus.plugin_runtime?.watcher?.mode || "未知" }} /
+              {{ lifecycleStatus.plugin_runtime?.watcher?.state || "未知" }}
+            </strong>
+          </div>
+          <div
+            v-if="lifecycleStatus.ownership?.unowned_resource_count"
+            class="startup-failures"
+          >
+            {{ lifecycleStatus.ownership.unowned_resource_count }} 项长期资源尚未归属
+          </div>
+          <div v-if="lifecycleStatus.recovery_required?.length" class="startup-failures">
+            需要恢复：{{ lifecycleStatus.recovery_required.join("、") }}
+          </div>
+          <div v-if="lifecycleUnhealthyComponents.length" class="startup-failures">
+            {{ lifecycleUnhealthyComponents.join("、") }}
+          </div>
+          <div v-if="sharedDependencyConflicts.length" class="startup-failures">
+            共享依赖冲突：{{ sharedDependencyConflicts.join("、") }}
+          </div>
+        </section>
+        <section
+          v-if="lifecycleStatus.operation_registry?.operations?.length"
+          class="startup-report-section"
+        >
+          <h3>后台操作</h3>
+          <div
+            v-for="operation in lifecycleStatus.operation_registry.operations.slice(-8).reverse()"
+            :key="operation.operation_id"
+            class="startup-operation-row"
+          >
+            <span>{{ operation.kind }}</span>
+            <strong :class="`is-${operation.state}`">{{ operation.phase }}</strong>
+          </div>
+        </section>
+        <section v-if="startupDegradedReasons.length" class="startup-report-section">
+          <h3>降级原因</h3>
+          <div
+            v-for="reason in startupDegradedReasons"
+            :key="`${reason.stage}-${reason.source_type}-${reason.source_id}-${reason.code}`"
+            class="startup-operation-row"
+          >
+            <span>{{ degradedReasonLabel(reason) }}</span>
+            <strong class="is-failed">{{ reason.code }}</strong>
+          </div>
+        </section>
+        <section v-if="lifecycleStatus.process" class="startup-report-section">
+          <h3>运行健康</h3>
+          <div class="startup-report-row">
+            <span>异步任务</span>
+            <strong>{{ lifecycleStatus.process.asyncio_task_count || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>线程</span>
+            <strong>{{ lifecycleStatus.process.thread_count || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>子进程</span>
+            <strong>{{ lifecycleStatus.process.child_process_count || 0 }}</strong>
+          </div>
+          <div class="startup-report-row">
+            <span>事件循环延迟</span>
+            <strong>{{ formatDuration(lifecycleStatus.process.event_loop_lag_ms) }}</strong>
+          </div>
+          <template v-if="launcherWorkerProcess">
+            <div class="startup-report-row">
+              <span>Worker spawn PID</span>
+              <strong>{{ launcherWorkerProcess.spawn_pid || "-" }}</strong>
+            </div>
+            <div class="startup-report-row">
+              <span>Worker runtime PID</span>
+              <strong>{{ launcherWorkerProcess.runtime_pid || "-" }}</strong>
+            </div>
+          </template>
         </section>
         <section class="startup-report-section">
           <h3>慢事务</h3>
@@ -459,6 +572,13 @@ export default {
       socketStates: { status: "connecting", log: "idle", chat: "idle" },
       startupStatus: { state: "starting", stages: {}, errors: [] },
       startupReport: { state: "starting", stages: {}, errors: [] },
+      lifecycleStatus: {
+        component_count: 0,
+        state_counts: {},
+        components: [],
+        process: null,
+        operation_registry: { operations: [], active_count: 0 },
+      },
       startupDrawerVisible: false,
       startupReportLoading: false,
       startupPollTimer: null,
@@ -560,12 +680,20 @@ export default {
       const state = this.startupStatus.state || "starting"
       if (state === "warmup_ready") return { status: "ok", label: "全部就绪", detail: "运行时、渲染与AI预热均已完成" }
       if (state === "runtime_ready") return { status: "warning", label: "服务预热", detail: "Bot运行时已就绪，渲染与AI服务正在预热" }
-      if (state === "degraded") return { status: "warning", label: "部分降级", detail: `启动完成，但有 ${this.startupStatus.errors?.length || 1} 项能力预热失败` }
+      if (state === "degraded") {
+        const reason = (this.startupStatus.degraded_reasons || [])[0]
+        const source = reason?.display_name || reason?.source_id
+        const stage = this.startupStageLabel(reason?.stage)
+        return { status: "warning", label: "部分降级", detail: source ? `${stage}：${source} (${reason.code})` : `启动完成，但有 ${this.startupStatus.errors?.length || 1} 项能力降级` }
+      }
       if (state === "failed") return { status: "danger", label: "启动异常", detail: "Bot运行时初始化失败，管理功能仍可用于诊断" }
       return { status: "warning", label: "运行时初始化", detail: "WebUI与数据库已可用，Bot事件暂不处理" }
     },
     startupElapsed() {
       return this.formatDuration(this.startupReport.elapsed_ms || this.startupStatus.elapsed_ms || 0)
+    },
+    startupOperatingMode() {
+      return this.startupReport.operating_mode || this.startupStatus.operating_mode || "normal"
     },
     startupStages() {
       const stages = this.startupReport.stages || this.startupStatus.stages || {}
@@ -580,6 +708,40 @@ export default {
     },
     startupSlowOperations() {
       return (this.startupReport.slow_operations || this.startupStatus.slow_operations || []).slice(0, 12)
+    },
+    startupDegradedReasons() {
+      return this.startupReport.degraded_reasons || this.startupStatus.degraded_reasons || []
+    },
+    lifecycleReadyCount() {
+      const states = this.lifecycleStatus.state_counts || {}
+      return Number(states.ready || 0)
+    },
+    lifecycleActiveResources() {
+      const resources = [
+        ...(this.lifecycleStatus.components || []),
+        ...(this.lifecycleStatus.dynamic_scopes || []),
+      ]
+      return resources.reduce((total, component) => {
+        const counts = component.resource_counts || {}
+        return total + Object.entries(counts).reduce(
+          (sum, [key, value]) => sum + (key.endsWith(":active") ? Number(value || 0) : 0),
+          0
+        )
+      }, 0)
+    },
+    lifecycleUnhealthyComponents() {
+      return (this.lifecycleStatus.components || [])
+        .filter((component) => ["degraded", "failed"].includes(component.state))
+        .slice(0, 8)
+        .map((component) => component.component_id)
+    },
+    launcherWorkerProcess() {
+      return (this.lifecycleStatus.launcher?.process_graph || [])
+        .find((process) => process.role === "worker") || null
+    },
+    sharedDependencyConflicts() {
+      const evidence = this.lifecycleStatus.plugin_runtime?.shared_dependency_evidence || {}
+      return Object.keys(evidence).slice(0, 8)
     },
     restartTooltip() {
       if (this.pendingRestartCount) return `有 ${this.pendingRestartCount} 项修改等待重启应用`
@@ -615,6 +777,13 @@ export default {
   },
   inject: ["setAppTheme"],
   methods: {
+    startupStageLabel(stage) {
+      return { management: "管理阶段", runtime: "运行时", warmup: "预热阶段" }[stage] || "启动阶段"
+    },
+    degradedReasonLabel(reason) {
+      const source = reason.display_name || reason.source_id || "未知来源"
+      return `${this.startupStageLabel(reason.stage)} · ${source}`
+    },
     async loadStartupStatus() {
       if (this.startupPollTimer) window.clearTimeout(this.startupPollTimer)
       try {
@@ -635,12 +804,22 @@ export default {
       this.startupReportLoading = true
       this.startupReport = { ...this.startupStatus }
       try {
-        const response = await this.getRequest(
-          `${this.$root.prefix}/system/startup/report`,
-          {},
-          { suppressErrorToast: true }
-        )
+        const [response, lifecycleResponse] = await Promise.all([
+          this.getRequest(
+            `${this.$root.prefix}/system/startup/report`,
+            {},
+            { suppressErrorToast: true }
+          ),
+          this.getRequest(
+            `${this.$root.prefix}/system/lifecycle/status`,
+            {},
+            { suppressErrorToast: true }
+          ),
+        ])
         if (response?.suc && response.data) this.startupReport = response.data
+        if (lifecycleResponse?.suc && lifecycleResponse.data) {
+          this.lifecycleStatus = lifecycleResponse.data
+        }
       } finally {
         this.startupReportLoading = false
       }
